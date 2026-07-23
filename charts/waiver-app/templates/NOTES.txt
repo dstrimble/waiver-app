@@ -1,0 +1,23 @@
+Waiver app has been deployed.
+
+Useful URLs:
+{{- if .Values.ingress.enabled }}
+  Public form: https://{{ .Values.ingress.host }}/waiver
+  Admin:       https://{{ .Values.ingress.host }}/waiver/admin
+{{- else }}
+  Ingress is disabled. Use kubectl port-forward:
+    kubectl -n {{ .Release.Namespace }} port-forward svc/frontend 8080:{{ .Values.frontend.service.port }}
+  Then open:
+    http://localhost:8080/waiver
+    http://localhost:8080/waiver/admin
+{{- end }}
+
+Admin backdoor passcode:
+- The value from secret key ADMIN_PASSCODE always works (env fallback), even if the DB-backed admin password is rotated in /waiver/admin.
+
+{{- if .Values.cloudflared.enabled }}
+Cloudflare tunnel is enabled.
+- The deployment uses secret {{ .Values.cloudflared.tokenSecret.name }} key {{ .Values.cloudflared.tokenSecret.key }}.
+{{- else }}
+Cloudflare tunnel is disabled.
+{{- end }}

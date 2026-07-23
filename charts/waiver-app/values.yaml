@@ -1,0 +1,109 @@
+nameOverride: ""
+fullnameOverride: ""
+
+imagePullSecrets: []
+
+secret:
+  name: app-secrets
+  create: true
+  pgPassword: "replace-me"
+  adminPasscode: "replace-me"
+
+postgres:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: postgres
+    tag: "16-alpine"
+    pullPolicy: IfNotPresent
+  auth:
+    user: postgres
+    database: waiver_app
+  pgDataDir: /var/lib/postgresql/data/pgdata
+  service:
+    port: 5432
+    targetPort: 5432
+  persistence:
+    enabled: true
+    accessModes:
+      - ReadWriteOnce
+    size: 5Gi
+    storageClassName: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+backend:
+  replicaCount: 1
+  image:
+    repository: your-registry/waiver-app-backend
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    port: 4000
+    targetPort: 4000
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi
+
+frontend:
+  replicaCount: 1
+  image:
+    repository: your-registry/waiver-app-frontend
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 80
+    targetPort: 80
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 150m
+      memory: 128Mi
+
+ingress:
+  enabled: true
+  className: nginx
+  host: waiver.example.com
+  annotations: {}
+  paths:
+    - /waiver
+    - /waiver/admin
+    - /
+  tls:
+    enabled: false
+    secretName: waiver-app-tls
+
+cloudflared:
+  enabled: false
+  image:
+    repository: cloudflare/cloudflared
+    tag: latest
+    pullPolicy: IfNotPresent
+  command:
+    - tunnel
+    - --no-autoupdate
+    - run
+  tokenSecret:
+    name: cloudflared-tunnel-token
+    key: TUNNEL_TOKEN
+    create: false
+    token: ""
+  resources:
+    requests:
+      cpu: 10m
+      memory: 24Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi

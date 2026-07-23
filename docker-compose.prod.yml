@@ -1,0 +1,14 @@
+services:
+  db:
+    environment:
+      POSTGRES_PASSWORD: ${PGPASSWORD:?set PGPASSWORD}
+    restart: unless-stopped
+
+  backend:
+    environment:
+      PGPASSWORD: ${PGPASSWORD:?set PGPASSWORD}
+      ADMIN_PASSCODE: ${ADMIN_PASSCODE:?set ADMIN_PASSCODE}
+    restart: unless-stopped
+
+  frontend:
+    restart: unless-stopped
