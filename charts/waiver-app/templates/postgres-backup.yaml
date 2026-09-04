@@ -1,0 +1,121 @@
+{{- if and .Values.postgres.enabled .Values.backup.enabled }}
+{{- if .Values.backup.credentialsSecret.create }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Values.backup.credentialsSecret.name }}
+  labels:
+    {{- include "waiver-app.labels" . | nindent 4 }}
+    app: postgres-backup
+type: Opaque
+stringData:
+  {{ .Values.backup.credentialsSecret.accessKeyIdKey }}: {{ .Values.backup.credentialsSecret.accessKey | quote }}
+  {{ .Values.backup.credentialsSecret.secretAccessKeyKey }}: {{ .Values.backup.credentialsSecret.secretKey | quote }}
+---
+{{- end }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  labels:
+    {{- include "waiver-app.labels" . | nindent 4 }}
+    app: postgres-backup
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: {{ .Values.backup.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.backup.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: {{ .Values.backup.backoffLimit }}
+      activeDeadlineSeconds: {{ .Values.backup.activeDeadlineSeconds }}
+      template:
+        metadata:
+          labels:
+            app: postgres-backup
+            app.kubernetes.io/instance: {{ .Release.Name }}
+        spec:
+          restartPolicy: OnFailure
+          {{- $pullSecrets := include "waiver-app.imagePullSecrets" . }}
+          {{- if $pullSecrets }}
+          imagePullSecrets:
+            {{- $pullSecrets | nindent 12 }}
+          {{- end }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            fsGroup: 65534
+          initContainers:
+            - name: pg-dump
+              image: "{{ .Values.backup.dumpImage.repository }}:{{ .Values.backup.dumpImage.tag }}"
+              imagePullPolicy: {{ .Values.backup.dumpImage.pullPolicy }}
+              command:
+                - /bin/sh
+                - -ec
+                - |
+                  pg_dump --format=custom --compress=9 \
+                    --file="/backup/${BACKUP_FILE}"
+              env:
+                - name: PGHOST
+                  value: postgres
+                - name: PGPORT
+                  value: {{ .Values.postgres.service.port | quote }}
+                - name: PGUSER
+                  value: {{ .Values.postgres.auth.user | quote }}
+                - name: PGDATABASE
+                  value: {{ .Values.postgres.auth.database | quote }}
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.secret.name }}
+                      key: PGPASSWORD
+                - name: BACKUP_FILE
+                  value: {{ printf "%s.dump" .Values.postgres.auth.database | quote }}
+              volumeMounts:
+                - name: backup
+                  mountPath: /backup
+              resources:
+                {{- toYaml .Values.backup.resources | nindent 16 }}
+          containers:
+            - name: upload
+              image: "{{ .Values.backup.uploadImage.repository }}:{{ .Values.backup.uploadImage.tag }}"
+              imagePullPolicy: {{ .Values.backup.uploadImage.pullPolicy }}
+              command:
+                - /bin/sh
+                - -ec
+                - |
+                  STAMP="$(date -u +%Y/%m/%d/%Y%m%dT%H%M%SZ)"
+                  aws --endpoint-url "${S3_ENDPOINT}" s3 cp \
+                    "/backup/${BACKUP_FILE}" \
+                    "s3://${S3_BUCKET}/${S3_PREFIX}/${STAMP}-${BACKUP_FILE}" \
+                    --only-show-errors
+              env:
+                - name: AWS_DEFAULT_REGION
+                  value: {{ .Values.backup.objectStorage.region | quote }}
+                - name: S3_ENDPOINT
+                  value: {{ .Values.backup.objectStorage.endpoint | quote }}
+                - name: S3_BUCKET
+                  value: {{ .Values.backup.objectStorage.bucket | quote }}
+                - name: S3_PREFIX
+                  value: {{ .Values.backup.objectStorage.prefix | quote }}
+                - name: BACKUP_FILE
+                  value: {{ printf "%s.dump" .Values.postgres.auth.database | quote }}
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.backup.credentialsSecret.name }}
+                      key: {{ .Values.backup.credentialsSecret.accessKeyIdKey }}
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.backup.credentialsSecret.name }}
+                      key: {{ .Values.backup.credentialsSecret.secretAccessKeyKey }}
+              volumeMounts:
+                - name: backup
+                  mountPath: /backup
+              resources:
+                {{- toYaml .Values.backup.resources | nindent 16 }}
+          volumes:
+            - name: backup
+              emptyDir: {}
+{{- end }}

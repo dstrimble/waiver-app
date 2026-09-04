@@ -8,3 +8,5 @@ dist/
 .env.*
 *.log
 coverage/
+linode-values.yaml
+*.sql.gz

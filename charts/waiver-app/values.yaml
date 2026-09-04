@@ -20,6 +20,7 @@ postgres:
     user: postgres
     database: waiver_app
   pgDataDir: /var/lib/postgresql/data/pgdata
+  terminationGracePeriodSeconds: 60
   service:
     port: 5432
     targetPort: 5432
@@ -28,10 +29,52 @@ postgres:
     accessModes:
       - ReadWriteOnce
     size: 5Gi
-    storageClassName: ""
+    # Linode CSI class with reclaimPolicy: Retain so the block storage volume
+    # survives PVC/StatefulSet deletion.
+    storageClassName: linode-block-storage-retain
   resources:
     requests:
       cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# Off-cluster daily logical backups to Linode Object Storage (S3 compatible).
+backup:
+  enabled: true
+  schedule: "0 3 * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  backoffLimit: 2
+  # Fails the job rather than letting it hang forever.
+  activeDeadlineSeconds: 3600
+  dumpImage:
+    repository: postgres
+    tag: "16-alpine"
+    pullPolicy: IfNotPresent
+  uploadImage:
+    repository: amazon/aws-cli
+    tag: "2.17.0"
+    pullPolicy: IfNotPresent
+  objectStorage:
+    bucket: postgres-backups
+    region: us-east-1
+    endpoint: https://us-east-1.linodeobjects.com
+    prefix: waiver-app
+  # Secret holding AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY for the Linode
+  # Object Storage access key. Set create: false to use one made out-of-band
+  # (see scripts/setup-object-storage.sh).
+  credentialsSecret:
+    name: linode-object-storage
+    create: false
+    accessKey: ""
+    secretKey: ""
+    accessKeyIdKey: AWS_ACCESS_KEY_ID
+    secretAccessKeyKey: AWS_SECRET_ACCESS_KEY
+  resources:
+    requests:
+      cpu: 50m
       memory: 128Mi
     limits:
       cpu: 500m

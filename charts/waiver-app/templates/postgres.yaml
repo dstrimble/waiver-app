@@ -1,13 +1,17 @@
 {{- if .Values.postgres.enabled }}
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: postgres
   labels:
     {{- include "waiver-app.labels" . | nindent 4 }}
     app: postgres
 spec:
+  serviceName: postgres-headless
   replicas: {{ .Values.postgres.replicaCount }}
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
   selector:
     matchLabels:
       app: postgres
@@ -22,6 +26,7 @@ spec:
       imagePullSecrets:
         {{- $pullSecrets | nindent 8 }}
       {{- end }}
+      terminationGracePeriodSeconds: {{ .Values.postgres.terminationGracePeriodSeconds }}
       containers:
         - name: postgres
           image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
@@ -39,7 +44,8 @@ spec:
                   name: {{ .Values.secret.name }}
                   key: PGPASSWORD
           ports:
-            - containerPort: {{ .Values.postgres.service.targetPort }}
+            - name: postgres
+              containerPort: {{ .Values.postgres.service.targetPort }}
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
@@ -53,29 +59,47 @@ spec:
                 - {{ .Values.postgres.auth.database }}
             initialDelaySeconds: 5
             periodSeconds: 10
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - {{ .Values.postgres.auth.user }}
+                - -d
+                - {{ .Values.postgres.auth.database }}
+            initialDelaySeconds: 30
+            periodSeconds: 20
           resources:
             {{- toYaml .Values.postgres.resources | nindent 12 }}
-      volumes:
-        - name: data
-          persistentVolumeClaim:
-            claimName: postgres-data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "waiver-app.labels" . | nindent 10 }}
+          app: postgres
+      spec:
+        accessModes:
+          {{- toYaml .Values.postgres.persistence.accessModes | nindent 10 }}
+        storageClassName: {{ required "postgres.persistence.storageClassName is required (use linode-block-storage-retain)" .Values.postgres.persistence.storageClassName | quote }}
+        resources:
+          requests:
+            storage: {{ .Values.postgres.persistence.size }}
 ---
 apiVersion: v1
-kind: PersistentVolumeClaim
+kind: Service
 metadata:
-  name: postgres-data
+  name: postgres-headless
   labels:
     {{- include "waiver-app.labels" . | nindent 4 }}
     app: postgres
 spec:
-  accessModes:
-    {{- toYaml .Values.postgres.persistence.accessModes | nindent 4 }}
-  resources:
-    requests:
-      storage: {{ .Values.postgres.persistence.size }}
-  {{- if .Values.postgres.persistence.storageClassName }}
-  storageClassName: {{ .Values.postgres.persistence.storageClassName }}
-  {{- end }}
+  clusterIP: None
+  selector:
+    app: postgres
+  ports:
+    - name: postgres
+      port: {{ .Values.postgres.service.port }}
+      targetPort: {{ .Values.postgres.service.targetPort }}
 ---
 apiVersion: v1
 kind: Service
@@ -88,6 +112,7 @@ spec:
   selector:
     app: postgres
   ports:
-    - port: {{ .Values.postgres.service.port }}
+    - name: postgres
+      port: {{ .Values.postgres.service.port }}
       targetPort: {{ .Values.postgres.service.targetPort }}
 {{- end }}

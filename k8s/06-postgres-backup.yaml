@@ -1,0 +1,91 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  namespace: gravitas
+spec:
+  schedule: "0 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 3600
+      template:
+        metadata:
+          labels:
+            app: postgres-backup
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            fsGroup: 65534
+          initContainers:
+            - name: pg-dump
+              image: postgres:16-alpine
+              command:
+                - /bin/sh
+                - -ec
+                - |
+                  pg_dump --format=custom --compress=9 \
+                    --file="/backup/${BACKUP_FILE}"
+              env:
+                - name: PGHOST
+                  value: postgres
+                - name: PGPORT
+                  value: "5432"
+                - name: PGUSER
+                  value: postgres
+                - name: PGDATABASE
+                  value: waiver_app
+                - name: BACKUP_FILE
+                  value: waiver_app.dump
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: app-secrets
+                      key: PGPASSWORD
+              volumeMounts:
+                - name: backup
+                  mountPath: /backup
+          containers:
+            - name: upload
+              image: amazon/aws-cli:2.17.0
+              command:
+                - /bin/sh
+                - -ec
+                - |
+                  STAMP="$(date -u +%Y/%m/%d/%Y%m%dT%H%M%SZ)"
+                  aws --endpoint-url "${S3_ENDPOINT}" s3 cp \
+                    "/backup/${BACKUP_FILE}" \
+                    "s3://${S3_BUCKET}/${S3_PREFIX}/${STAMP}-${BACKUP_FILE}" \
+                    --only-show-errors
+              env:
+                - name: AWS_DEFAULT_REGION
+                  value: us-east-1
+                - name: S3_ENDPOINT
+                  value: https://us-east-1.linodeobjects.com
+                - name: S3_BUCKET
+                  value: postgres-backups
+                - name: S3_PREFIX
+                  value: waiver-app
+                - name: BACKUP_FILE
+                  value: waiver_app.dump
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: linode-object-storage
+                      key: AWS_ACCESS_KEY_ID
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: linode-object-storage
+                      key: AWS_SECRET_ACCESS_KEY
+              volumeMounts:
+                - name: backup
+                  mountPath: /backup
+          volumes:
+            - name: backup
+              emptyDir: {}
