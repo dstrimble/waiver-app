@@ -15,15 +15,26 @@ env:
   FRONTEND_IMAGE: dstrimble83/waiver-app-frontend
 
 jobs:
-  build-and-push:
+  tag:
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
-
       - id: tag
         run: echo "tag=$(date -u +%Y%m%d-%H%M)-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+  build-and-push:
+    needs: tag
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - context: backend
+            image: dstrimble83/waiver-app-backend
+          - context: frontend
+            image: dstrimble83/waiver-app-frontend
+    steps:
+      - uses: actions/checkout@v4
 
       - uses: docker/setup-buildx-action@v3
 
@@ -32,30 +43,19 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push backend
+      - name: Build and push ${{ matrix.context }}
         uses: docker/build-push-action@v6
         with:
-          context: backend
+          context: ${{ matrix.context }}
           push: true
           tags: |
-            ${{ env.BACKEND_IMAGE }}:${{ steps.tag.outputs.tag }}
-            ${{ env.BACKEND_IMAGE }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build and push frontend
-        uses: docker/build-push-action@v6
-        with:
-          context: frontend
-          push: true
-          tags: |
-            ${{ env.FRONTEND_IMAGE }}:${{ steps.tag.outputs.tag }}
-            ${{ env.FRONTEND_IMAGE }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            ${{ matrix.image }}:${{ needs.tag.outputs.tag }}
+            ${{ matrix.image }}:latest
+          cache-from: type=gha,scope=${{ matrix.context }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.context }}
 
   deploy:
-    needs: build-and-push
+    needs: [tag, build-and-push]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -71,7 +71,7 @@ jobs:
 
       - name: Helm upgrade
         env:
-          TAG: ${{ needs.build-and-push.outputs.tag }}
+          TAG: ${{ needs.tag.outputs.tag }}
         run: |
           helm upgrade --install waiver-app charts/waiver-app \
             -n gravitas --create-namespace \
