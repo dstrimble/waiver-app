@@ -1,0 +1,52 @@
+# Non-secret overrides for the Linode "gravitas" deployment, used by CI.
+# app-secrets, linode-object-storage and cloudflared-tunnel-token already
+# exist in the namespace (created out-of-band), so helm leaves them alone.
+#
+#   helm upgrade --install waiver-app charts/waiver-app \
+#     -n gravitas --create-namespace -f charts/waiver-app/values-linode.yaml \
+#     --set backend.image.tag=<tag> --set frontend.image.tag=<tag>
+
+secret:
+  name: app-secrets
+  create: false
+
+postgres:
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClassName: linode-block-storage-retain
+
+backup:
+  enabled: true
+  schedule: "0 7 * * *"
+  objectStorage:
+    bucket: postgres-backups
+    prefix: waiver-app
+    region: us-ord-10
+    endpoint: https://us-ord-10.linodeobjects.com
+  credentialsSecret:
+    name: linode-object-storage
+    create: false
+
+backend:
+  image:
+    repository: dstrimble83/waiver-app-backend
+
+frontend:
+  image:
+    repository: dstrimble83/waiver-app-frontend
+
+ingress:
+  enabled: true
+  className: nginx
+  host: gravitas.trimblebarra.com
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+  tls:
+    enabled: false
+
+cloudflared:
+  enabled: true
+  tokenSecret:
+    name: cloudflared-tunnel-token
+    create: false
