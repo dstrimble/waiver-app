@@ -39,9 +39,15 @@ const SUBMISSION = {
   signatureDataUrl: SIGNATURE_PNG,
 };
 
-// The route emails after responding, so tests wait for those sends to land.
-function flushAsync() {
-  return new Promise((resolve) => setTimeout(resolve, 0));
+// The route emails after responding, and rendering the PDF first takes several
+// ticks, so a single flush races the notification. Poll for the effect instead.
+async function waitFor(label, predicate, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`timed out waiting for ${label}`);
 }
 
 describe("waiver api", () => {
@@ -96,6 +102,21 @@ describe("waiver api", () => {
     expect(insertParams).toContain(WAIVER_TEXT_VERSION);
   });
 
+  it("waiver text covers recording and is versioned past v1", async () => {
+    const { WAIVER_TEXT_VERSION: version, WAIVER_PARAGRAPHS: paragraphs } =
+      await vi.importActual("../src/waiverText.js");
+
+    const recording = paragraphs.find((p) => /Recording of training/.test(p));
+    expect(recording).toBeDefined();
+    expect(recording).toMatch(/consent to being recorded/i);
+    // Scoped to member review: promotional use is explicitly carved out.
+    expect(recording).toMatch(/not be used for advertising, marketing/i);
+    expect(recording).toMatch(/do not wish to be recorded/i);
+
+    // Rows signed under the old copy must stay distinguishable from these.
+    expect(version).not.toBe("v1");
+  });
+
   it("GET /api/waivers/text serves the waiver copy the PDF uses", async () => {
     const res = await request(createApp()).get("/api/waivers/text");
 
@@ -119,7 +140,7 @@ describe("waiver api", () => {
     });
 
     expect(res.status).toBe(201);
-    await flushAsync();
+    await waitFor("both emails to be sent", () => sendMailMock.mock.calls.length === 2);
 
     expect(sendMailMock).toHaveBeenCalledTimes(2);
     const recipients = sendMailMock.mock.calls.map(([message]) => message.to);
@@ -146,10 +167,12 @@ describe("waiver api", () => {
     });
 
     expect(res.status).toBe(201);
-    await flushAsync();
+    const findUpdate = () =>
+      queryMock.mock.calls.find(([sql]) => sql.includes("notification_error"));
+    await waitFor("the failure to be recorded", () => Boolean(findUpdate()));
 
     // The failure is recorded on the row instead of failing the submission.
-    const update = queryMock.mock.calls.find(([sql]) => sql.includes("notification_error"));
+    const update = findUpdate();
     expect(update).toBeDefined();
     expect(update[1][2]).toMatch(/smtp is down/);
   });
