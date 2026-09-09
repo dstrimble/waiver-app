@@ -116,7 +116,8 @@ adminRouter.get("/waivers", requireAdmin, async (req, res) => {
         id, submitted_at, interests, name, parent_name, address, city, state,
         zip, cell_phone, home_phone, email, date_of_birth,
         other_gym_member, membership_expires, heard_about, looking_for,
-        accepted, signature_name, signature_data_url
+        accepted, signature_name, signature_data_url,
+        notification_sent_at, notification_error
       FROM waiver_submissions
       ${whereClause}
       ORDER BY submitted_at DESC
