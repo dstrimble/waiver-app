@@ -89,7 +89,9 @@ export function buildMemberEmail(submission, config) {
     textParts.push("");
   } else {
     textParts.push(
-      "To sign up for a membership or make changes to your account, talk to a coach at the front desk on your next visit.",
+      `To sign up for a membership or manage your account, visit ${
+        config.websiteUrl || "our website"
+      }.`,
       ""
     );
   }
@@ -116,7 +118,13 @@ export function buildMemberEmail(submission, config) {
            )
            .join("")}
        </ul>`
-    : `<p style="margin:28px 0 0;">To sign up for a membership or make changes to your account, talk to a coach at the front desk on your next visit.</p>`;
+    : `<p style="margin:28px 0 0;">To sign up for a membership or manage your account, visit ${
+        config.websiteUrl
+          ? `<a href="${escapeHtml(config.websiteUrl)}" style="color:#b3261e;font-weight:600;">${escapeHtml(
+              config.websiteUrl
+            )}</a>`
+          : "our website"
+      }.</p>`;
 
   const contactsHtml = contacts.length
     ? `<h2 style="margin:28px 0 12px;font-size:16px;">Questions?</h2>
