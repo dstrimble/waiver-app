@@ -37,6 +37,13 @@ CREATE TABLE IF NOT EXISTS waiver_submissions (
   signature_data_url  TEXT NOT NULL
 );
 
+-- Delivery status for the confirmation emails sent after a submission.
+-- Added after the initial release, so applied separately from the CREATE above.
+ALTER TABLE waiver_submissions
+  ADD COLUMN IF NOT EXISTS notification_sent_at TIMESTAMPTZ;
+ALTER TABLE waiver_submissions
+  ADD COLUMN IF NOT EXISTS notification_error   TEXT;
+
 CREATE INDEX IF NOT EXISTS idx_waiver_submitted_at
   ON waiver_submissions (submitted_at DESC);
 

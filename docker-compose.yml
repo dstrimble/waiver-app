@@ -23,6 +23,23 @@ services:
       PGDATABASE: waiver_app
       PORT: "4000"
       ADMIN_PASSCODE: changeme
+      # Waiver confirmation email over SMTP. Unset locally by default, in which
+      # case submissions still save and the send is skipped with a warning.
+      SMTP_HOST: "${SMTP_HOST:-}"
+      SMTP_PORT: "${SMTP_PORT:-587}"
+      SMTP_STARTTLS: "${SMTP_STARTTLS:-true}"
+      SMTP_USER: "${SMTP_USER:-}"
+      SMTP_PASSWORD: "${SMTP_PASSWORD:-}"
+      SMTP_FROM: "${SMTP_FROM:-}"
+      WAIVER_NOTIFY_EMAIL: "${WAIVER_NOTIFY_EMAIL:-gravitasmma@gmail.com}"
+      GYM_NAME: "${GYM_NAME:-Gravitas Mixed Martial Arts}"
+      GYM_PHONE: "${GYM_PHONE:-}"
+      GYM_ADDRESS: "${GYM_ADDRESS:-}"
+      GYM_WEBSITE_URL: "${GYM_WEBSITE_URL:-}"
+      SIGNUP_URL: "${SIGNUP_URL:-}"
+      ACCOUNT_PORTAL_URL: "${ACCOUNT_PORTAL_URL:-}"
+      SCHEDULE_URL: "${SCHEDULE_URL:-}"
+      DISPLAY_TIMEZONE: "${DISPLAY_TIMEZONE:-America/New_York}"
     depends_on:
       db:
         condition: service_healthy

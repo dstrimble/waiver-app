@@ -12,6 +12,10 @@ async function handle(res) {
   return res.json();
 }
 
+export function getWaiverText() {
+  return fetch("/api/waivers/text").then(handle);
+}
+
 export function submitWaiver(payload) {
   return fetch("/api/waivers", {
     method: "POST",

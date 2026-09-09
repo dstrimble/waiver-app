@@ -1,9 +1,25 @@
 import { Router } from "express";
 import { pool } from "../db.js";
+import { sendWaiverNotifications } from "../waiverNotifier.js";
+import {
+  WAIVER_ACCEPTANCE_STATEMENT,
+  WAIVER_PARAGRAPHS,
+  WAIVER_TEXT_VERSION,
+} from "../waiverText.js";
 
 export const waiversRouter = Router();
 
 const ALLOWED_INTERESTS = new Set(["BJJ", "Kickboxing", "MMA", "Kids Classes"]);
+
+// The public form renders this so the on-screen copy and the emailed PDF can
+// never drift apart.
+waiversRouter.get("/text", (_req, res) => {
+  return res.json({
+    version: WAIVER_TEXT_VERSION,
+    paragraphs: WAIVER_PARAGRAPHS,
+    acceptanceStatement: WAIVER_ACCEPTANCE_STATEMENT,
+  });
+});
 
 function clean(value) {
   const result = String(value || "").trim();
@@ -61,12 +77,12 @@ waiversRouter.post("/", async (req, res) => {
         interests, name, parent_name, address, city, state, zip,
         cell_phone, home_phone, email, date_of_birth, other_gym_member,
         membership_expires, heard_about, looking_for,
-        accepted, signature_name, signature_data_url
+        waiver_text_version, accepted, signature_name, signature_data_url
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7,
         $8, $9, $10, $11, $12,
         $13, $14, $15,
-        $16, $17, $18
+        $16, $17, $18, $19
       ) RETURNING id, submitted_at`,
       [
         interests,
@@ -84,15 +100,46 @@ waiversRouter.post("/", async (req, res) => {
         membershipExpires,
         heardAbout,
         lookingFor,
+        WAIVER_TEXT_VERSION,
         accepted,
         signatureName,
         signatureDataUrl,
       ]
     );
 
+    const { id, submitted_at: submittedAt } = result.rows[0];
+
+    // Emailing the PDF happens after the waiver is safely stored, and its
+    // outcome is recorded on the row rather than failing the submission.
+    sendWaiverNotifications({
+      id,
+      submittedAt,
+      interests,
+      name,
+      parentName,
+      address,
+      city,
+      state,
+      zip,
+      cellPhone,
+      homePhone,
+      email,
+      dateOfBirth,
+      otherGymMember,
+      membershipExpires,
+      heardAbout,
+      lookingFor,
+      waiverTextVersion: WAIVER_TEXT_VERSION,
+      accepted,
+      signatureName,
+      signatureDataUrl,
+    }).catch((err) => {
+      console.error("Unexpected waiver notification error:", err);
+    });
+
     return res.status(201).json({
-      id: result.rows[0].id,
-      submittedAt: result.rows[0].submitted_at,
+      id,
+      submittedAt,
       message: "Waiver submitted successfully.",
     });
   } catch (err) {

@@ -1,19 +1,14 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   adminChangePasscode,
   adminGetWaivers,
+  getWaiverText,
   submitWaiver,
   verifyAdmin,
 } from "./api.js";
 import SignaturePad from "./components/SignaturePad.jsx";
 
 const INTERESTS = ["BJJ", "Kickboxing", "MMA", "Kids Classes"];
-
-const WAIVER_PARAGRAPHS = [
-  "Assumption of risk: The use of Gravitas Mixed Martial Arts naturally involves the risk of injury whether you or someone else causes it. As such, you understand and voluntarily accept this risk and agree that Gravitas Mixed Martial Arts will not be liable for injury, including, without limitation, personal, bodily or mental injury, economic loss or any damage to you or unborn child resulting from negligence of Gravitas Mixed Martial Arts or anyone on Gravitas Mixed Martial Arts' behalf or anyone using the facility, whether the negligence is sole, joint, concurrent, active or passive.",
-  "By signing this waiver you acknowledge your assumption of risk and warrant, represent, and agree that you are in good physical condition and that you have no disability, impairment, or ailment preventing you from engaging in active or passive exercise or that will be detrimental or inimical to your health, safety, comfort, or physical condition while engaging or participating in exercise. You also agree that you will not use the facilities with any open cuts, abrasions, open sores, infections, maladies with potential of harm to others, or the like, in accordance with public health requirements.",
-  "It is further agreed that all exercises including the use of the facility (including parking lot), weights, number of repetitions, and use of any and all machinery, equipment, and apparatus designed for exercising shall be at your sole risk. Notwithstanding any consultation on exercise programs which may be provided by Gravitas Mixed Martial Arts employees, it is hereby understood that the selection of exercise programs, methods and types of equipment shall be your entire responsibility, and Gravitas Mixed Martial Arts shall not be liable to you for any claims, demands, injuries, damages, or actions arising due to injury to guest's person or property out of or in connection with the use by guest of the services and facilities of Gravitas Mixed Martial Arts on the premises where the same is located."
-];
 
 const EMPTY_FORM = {
   interests: [],
@@ -330,6 +325,14 @@ function AdminPage() {
                       <p>
                         <strong>Looking For:</strong> {selectedWaiver.looking_for || "-"}
                       </p>
+                      <p>
+                        <strong>Waiver Email:</strong>{" "}
+                        {selectedWaiver.notification_sent_at
+                          ? `Sent ${toDisplayDate(selectedWaiver.notification_sent_at)}`
+                          : selectedWaiver.notification_error
+                            ? `Not sent - ${selectedWaiver.notification_error}`
+                            : "Pending"}
+                      </p>
 
                       <div className="signature-preview">
                         <p>
@@ -377,6 +380,26 @@ function PublicWaiverPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [waiverText, setWaiverText] = useState(null);
+  const [waiverTextError, setWaiverTextError] = useState("");
+
+  // The waiver copy lives on the backend so the on-screen text and the emailed
+  // PDF are always the same document.
+  useEffect(() => {
+    let cancelled = false;
+    getWaiverText()
+      .then((data) => {
+        if (!cancelled) setWaiverText(data);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setWaiverTextError("Could not load the waiver text. Please refresh the page.");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function update(key, value) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -430,6 +453,10 @@ function PublicWaiverPage() {
       return;
     }
 
+    if (!waiverText) {
+      setError("The waiver text is still loading. Please try again in a moment.");
+      return;
+    }
     if (!form.accepted) {
       setError("You must acknowledge the waiver to continue.");
       return;
@@ -447,7 +474,9 @@ function PublicWaiverPage() {
         signatureDataUrl: padRef.current.toDataURL(),
       });
 
-      setSuccess("Thanks. Your waiver has been submitted.");
+      setSuccess(
+        "Thanks. Your waiver has been submitted - a PDF copy is on its way to your email."
+      );
       setForm(EMPTY_FORM);
       padRef.current.clear();
     } catch (err) {
@@ -584,9 +613,13 @@ function PublicWaiverPage() {
 
           <h2>Waiver & Release</h2>
           <div className="waiver-copy">
-            {WAIVER_PARAGRAPHS.map((text) => (
-              <p key={text}>{text}</p>
-            ))}
+            {waiverTextError ? (
+              <p className="error">{waiverTextError}</p>
+            ) : waiverText ? (
+              waiverText.paragraphs.map((text) => <p key={text}>{text}</p>)
+            ) : (
+              <p className="empty-state">Loading waiver text...</p>
+            )}
           </div>
 
           <label className="accept-row">
@@ -594,10 +627,12 @@ function PublicWaiverPage() {
               type="checkbox"
               checked={form.accepted}
               onChange={(e) => update("accepted", e.target.checked)}
+              disabled={!waiverText}
               required
             />
             <span>
-              I have read and agree to the waiver and release above.
+              {waiverText?.acceptanceStatement ||
+                "I have read and agree to the waiver and release above."}
               <span className="required-mark" aria-hidden="true"> *</span>
             </span>
           </label>
@@ -627,7 +662,7 @@ function PublicWaiverPage() {
           {error ? <p className="error">{error}</p> : null}
           {success ? <p className="success">{success}</p> : null}
 
-          <button className="submit" type="submit" disabled={saving}>
+          <button className="submit" type="submit" disabled={saving || !waiverText}>
             {saving ? "Submitting..." : "Submit Waiver"}
           </button>
         </form>

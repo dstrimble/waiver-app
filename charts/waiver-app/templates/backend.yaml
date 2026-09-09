@@ -48,6 +48,24 @@ spec:
                   key: ADMIN_PASSCODE
             - name: PORT
               value: {{ .Values.backend.service.targetPort | quote }}
+            {{- /*
+              Gmail app password for the waiver confirmation emails. Marked
+              optional so an existing app-secrets without the key does not block
+              the pod from starting; the backend logs a warning and skips
+              sending until it is present.
+            */}}
+            - name: SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secret.name }}
+                  key: SMTP_PASSWORD
+                  optional: true
+            {{- range $key, $value := .Values.email }}
+            {{- if $value }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- end }}
           readinessProbe:
             httpGet:
               path: /healthz

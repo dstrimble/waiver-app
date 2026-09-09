@@ -8,6 +8,10 @@ services:
     environment:
       PGPASSWORD: ${PGPASSWORD:?set PGPASSWORD}
       ADMIN_PASSCODE: ${ADMIN_PASSCODE:?set ADMIN_PASSCODE}
+      SMTP_HOST: ${SMTP_HOST:?set SMTP_HOST}
+      SMTP_USER: ${SMTP_USER:?set SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:?set SMTP_PASSWORD}
+      SMTP_FROM: ${SMTP_FROM:?set SMTP_FROM}
     restart: unless-stopped
 
   frontend:

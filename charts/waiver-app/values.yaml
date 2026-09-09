@@ -8,6 +8,32 @@ secret:
   create: true
   pgPassword: "replace-me"
   adminPasscode: "replace-me"
+  # Gmail app password used to send waiver confirmation emails.
+  # This is an app password, not the account password.
+  smtpPassword: ""
+
+# Non-secret waiver-email settings, passed straight through as backend env vars.
+# Blank values are omitted, and the email leaves out the matching section.
+email:
+  # Mailbox the waiver PDFs are sent from and received at. Leave SMTP_HOST or
+  # SMTP_FROM empty and nothing is sent; everything else works the same.
+  SMTP_HOST: "smtp.gmail.com"
+  SMTP_PORT: "587"
+  SMTP_STARTTLS: "true"
+  SMTP_USER: "gravitasmma@gmail.com"
+  SMTP_FROM: "Gravitas Mixed Martial Arts <gravitasmma@gmail.com>"
+  WAIVER_NOTIFY_EMAIL: "gravitasmma@gmail.com"
+  MAIL_REPLY_TO: ""
+  # Gym details and account links shown to the person who signed.
+  GYM_NAME: "Gravitas Mixed Martial Arts"
+  GYM_PHONE: ""
+  GYM_ADDRESS: ""
+  GYM_WEBSITE_URL: ""
+  SIGNUP_URL: ""
+  ACCOUNT_PORTAL_URL: ""
+  SCHEDULE_URL: ""
+  # Timezone used for timestamps printed on the PDF.
+  DISPLAY_TIMEZONE: "America/New_York"
 
 postgres:
   enabled: true
