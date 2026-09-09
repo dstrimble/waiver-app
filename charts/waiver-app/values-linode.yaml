@@ -20,13 +20,13 @@ email:
   SMTP_FROM: "Gravitas Mixed Martial Arts <gravitasmma@gmail.com>"
   WAIVER_NOTIFY_EMAIL: "gravitasmma@gmail.com"
   GYM_NAME: "Gravitas Mixed Martial Arts"
-  GYM_PHONE: ""
-  GYM_ADDRESS: ""
-  GYM_WEBSITE_URL: ""
-  SIGNUP_URL: ""
-  ACCOUNT_PORTAL_URL: ""
-  SCHEDULE_URL: ""
-  DISPLAY_TIMEZONE: "America/New_York"
+  GYM_PHONE: "501-497-5811"
+  GYM_ADDRESS: "2501 Dave Ward Dr. Suite A5 Conway, AR"
+  GYM_WEBSITE_URL: "https://www.gravitasmartialarts.com/"
+  SIGNUP_URL: "https://www.gravitasmartialarts.com/member-areas-4"
+  ACCOUNT_PORTAL_URL: "https://www.gravitasmartialarts.com/account/login"
+  SCHEDULE_URL: "https://www.gravitasmartialarts.com/schedule"
+  DISPLAY_TIMEZONE: "America/Chicago"
 
 postgres:
   persistence:

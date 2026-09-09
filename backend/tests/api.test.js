@@ -193,13 +193,27 @@ describe("waiver api", () => {
     expect(email.text).not.toContain("Manage your account");
   });
 
-  it("member email falls back to front-desk wording with no links configured", () => {
+  it("member email points at the website when no links are configured", () => {
     const email = buildMemberEmail(SUBMISSION, {
       gymName: "Gravitas MMA",
       notifyEmail: "gravitasmma@gmail.com",
+      websiteUrl: "https://www.gravitasmartialarts.com/",
     });
 
-    expect(email.text).toMatch(/talk to a coach at the front desk/i);
+    expect(email.text).toMatch(/visit https:\/\/www\.gravitasmartialarts\.com\//);
+    expect(email.text).not.toMatch(/front desk/i);
+    expect(email.html).toContain('href="https://www.gravitasmartialarts.com/"');
+  });
+
+  it("defaults the sign-up link so the member email always has one", async () => {
+    const { getSiteConfig } = await vi.importActual("../src/siteConfig.js");
+    delete process.env.SIGNUP_URL;
+
+    const config = getSiteConfig();
+    expect(config.signupUrl).toBe("https://www.gravitasmartialarts.com/member-areas-4");
+
+    const email = buildMemberEmail(SUBMISSION, config);
+    expect(email.text).toContain("member-areas-4");
   });
 
   it("gym email summarizes the submission", () => {
