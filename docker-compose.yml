@@ -33,12 +33,19 @@ services:
       SMTP_FROM: "${SMTP_FROM:-}"
       WAIVER_NOTIFY_EMAIL: "${WAIVER_NOTIFY_EMAIL:-gravitasmma@gmail.com}"
       GYM_NAME: "${GYM_NAME:-Gravitas Mixed Martial Arts}"
+      GYM_SHORT_NAME: "${GYM_SHORT_NAME:-Gravitas}"
       GYM_PHONE: "${GYM_PHONE:-}"
       GYM_ADDRESS: "${GYM_ADDRESS:-}"
       GYM_WEBSITE_URL: "${GYM_WEBSITE_URL:-}"
       SIGNUP_URL: "${SIGNUP_URL:-}"
       ACCOUNT_PORTAL_URL: "${ACCOUNT_PORTAL_URL:-}"
       SCHEDULE_URL: "${SCHEDULE_URL:-}"
+      # One-week follow-up email. Off locally by default so a dev database of
+      # old waivers cannot mail anyone.
+      FOLLOWUP_ENABLED: "${FOLLOWUP_ENABLED:-false}"
+      FOLLOWUP_DELAY_DAYS: "${FOLLOWUP_DELAY_DAYS:-7}"
+      FOLLOWUP_GRACE_DAYS: "${FOLLOWUP_GRACE_DAYS:-3}"
+      FOLLOWUP_POLL_MINUTES: "${FOLLOWUP_POLL_MINUTES:-60}"
       DISPLAY_TIMEZONE: "${DISPLAY_TIMEZONE:-America/New_York}"
     depends_on:
       db:

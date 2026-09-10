@@ -20,12 +20,17 @@ email:
   SMTP_FROM: "Gravitas Mixed Martial Arts <gravitasmma@gmail.com>"
   WAIVER_NOTIFY_EMAIL: "gravitasmma@gmail.com"
   GYM_NAME: "Gravitas Mixed Martial Arts"
+  GYM_SHORT_NAME: "Gravitas"
   GYM_PHONE: "501-497-5811"
   GYM_ADDRESS: "2501 Dave Ward Dr. Suite A5 Conway, AR"
   GYM_WEBSITE_URL: "https://www.gravitasmartialarts.com/"
   SIGNUP_URL: "https://www.gravitasmartialarts.com/member-areas-4"
   ACCOUNT_PORTAL_URL: "https://www.gravitasmartialarts.com/account/login"
   SCHEDULE_URL: "https://www.gravitasmartialarts.com/schedule"
+  FOLLOWUP_ENABLED: "true"
+  FOLLOWUP_DELAY_DAYS: "7"
+  FOLLOWUP_GRACE_DAYS: "3"
+  FOLLOWUP_POLL_MINUTES: "60"
   DISPLAY_TIMEZONE: "America/Chicago"
 
 postgres:

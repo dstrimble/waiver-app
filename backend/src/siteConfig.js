@@ -8,6 +8,9 @@ function env(name, fallback = "") {
 export function getSiteConfig() {
   return {
     gymName: env("GYM_NAME", "Gravitas Mixed Martial Arts"),
+    // Conversational form used in the follow-up email copy ("your free trial
+    // week at Gravitas"); falls back to the full name when unset.
+    gymShortName: env("GYM_SHORT_NAME"),
     notifyEmail: env("WAIVER_NOTIFY_EMAIL", "gravitasmma@gmail.com"),
     replyTo: env("MAIL_REPLY_TO"),
     websiteUrl: env("GYM_WEBSITE_URL", "https://www.gravitasmartialarts.com/"),
