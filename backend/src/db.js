@@ -66,13 +66,21 @@ ALTER TABLE waiver_submissions
 ALTER TABLE waiver_submissions
   ALTER COLUMN followup_eligible SET DEFAULT true;
 
+-- Archiving hides a waiver from the admin list, the charts and the follow-up
+-- queue without destroying the signed record, which is the document the gym
+-- would rely on in a dispute. Restoring is just clearing this column.
+ALTER TABLE waiver_submissions
+  ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
+
 CREATE INDEX IF NOT EXISTS idx_waiver_submitted_at
   ON waiver_submissions (submitted_at DESC);
 
 -- Keeps the follow-up sweep off a full table scan as the table grows.
-CREATE INDEX IF NOT EXISTS idx_waiver_followup_pending
+-- Superseded by the queue index below, which also excludes archived rows.
+DROP INDEX IF EXISTS idx_waiver_followup_pending;
+CREATE INDEX IF NOT EXISTS idx_waiver_followup_queue
   ON waiver_submissions (submitted_at)
-  WHERE followup_sent_at IS NULL AND followup_eligible;
+  WHERE followup_sent_at IS NULL AND followup_eligible AND archived_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS admin_auth (
   id            SMALLINT PRIMARY KEY CHECK (id = 1),

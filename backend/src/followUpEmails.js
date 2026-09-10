@@ -43,6 +43,7 @@ const CLAIM_DUE_SQL = `
         FROM waiver_submissions
        WHERE followup_sent_at IS NULL
          AND followup_eligible
+         AND archived_at IS NULL
          AND email IS NOT NULL
          AND submitted_at <= now() - make_interval(days => $1::int)
          AND submitted_at >  now() - make_interval(days => $2::int)
@@ -148,23 +149,24 @@ async function deliverClaimed(row, config) {
  * this is a person choosing to send it. It still goes through the same claim,
  * so the automatic sweep will not send a second copy afterwards.
  *
- * @returns {Promise<{status: "sent"|"already-sent"|"not-found"|"no-email"|"no-smtp", email?: string}>}
+ * @returns {Promise<{status: "sent"|"already-sent"|"not-found"|"no-email"|"archived"|"no-smtp", email?: string}>}
  */
 export async function sendFollowUpNow(id) {
   if (!isMailerConfigured()) return { status: "no-smtp" };
 
   const existing = await pool.query(
-    "SELECT id, email, followup_sent_at FROM waiver_submissions WHERE id = $1",
+    "SELECT id, email, followup_sent_at, archived_at FROM waiver_submissions WHERE id = $1",
     [id]
   );
   if (!existing.rows.length) return { status: "not-found" };
+  if (existing.rows[0].archived_at) return { status: "archived" };
   if (!existing.rows[0].email) return { status: "no-email" };
 
   // Claim conditionally, so a manual send racing the sweep cannot double up.
   const claimed = await pool.query(
     `UPDATE waiver_submissions
         SET followup_sent_at = now()
-      WHERE id = $1 AND followup_sent_at IS NULL
+      WHERE id = $1 AND followup_sent_at IS NULL AND archived_at IS NULL
       RETURNING id, name, email`,
     [id]
   );

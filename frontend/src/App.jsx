@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   adminChangePasscode,
-  adminDeleteWaiver,
+  adminArchiveWaiver,
   adminGetStats,
   adminGetWaivers,
   adminSendFollowUp,
@@ -84,8 +84,8 @@ function AdminPage() {
   const [rangeDays, setRangeDays] = useState(365);
   const [rowBusy, setRowBusy] = useState("");
   const [rowError, setRowError] = useState("");
-  const [rowNotice, setRowNotice] = useState("");
-  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [rowNotice, setRowNotice] = useState(null);
+  const [showArchived, setShowArchived] = useState(false);
   const [changeForm, setChangeForm] = useState({
     currentPasscode: "",
     newPasscode: "",
@@ -122,11 +122,11 @@ function AdminPage() {
     }
   }
 
-  async function loadWaivers(passcode, start, end) {
+  async function loadWaivers(passcode, start, end, includeArchived = showArchived) {
     setWaiversLoading(true);
     setWaiversError("");
     try {
-      const rows = await adminGetWaivers(passcode, { start, end });
+      const rows = await adminGetWaivers(passcode, { start, end, includeArchived });
       setWaivers(rows);
       setSelectedWaiver((current) => {
         if (!current) return rows[0] || null;
@@ -160,10 +160,12 @@ function AdminPage() {
     if (!admin?.passcode) return;
     setRowBusy(`followup-${row.id}`);
     setRowError("");
-    setRowNotice("");
+    setRowNotice(null);
     try {
       const result = await adminSendFollowUp(admin.passcode, row.id);
-      setRowNotice(`Follow-up sent to ${result.sentTo}. The automatic one is now cancelled.`);
+      setRowNotice({
+        text: `Follow-up sent to ${result.sentTo}. The automatic one is now cancelled.`,
+      });
       await Promise.all([
         loadWaivers(admin.passcode, dateRange.start, dateRange.end),
         loadStats(admin.passcode),
@@ -175,24 +177,39 @@ function AdminPage() {
     }
   }
 
-  async function deleteWaiver(row) {
+  // Archiving is reversible, so it needs no confirmation dialog - it offers an
+  // undo instead, and the record itself is never destroyed.
+  async function setArchived(row, archived) {
     if (!admin?.passcode) return;
-    setRowBusy(`delete-${row.id}`);
+    setRowBusy(`archive-${row.id}`);
     setRowError("");
-    setRowNotice("");
+    setRowNotice(null);
     try {
-      await adminDeleteWaiver(admin.passcode, row.id);
-      setConfirmDelete(null);
-      setRowNotice(`Deleted the waiver for ${row.name}.`);
-      setSelectedWaiver(null);
+      await adminArchiveWaiver(admin.passcode, row.id, archived);
+      setRowNotice({
+        text: archived
+          ? `Archived ${row.name}. The signed waiver is kept, just hidden.`
+          : `Restored ${row.name}.`,
+        undo: { row, archived: !archived },
+      });
+      if (archived && !showArchived) setSelectedWaiver(null);
       await Promise.all([
         loadWaivers(admin.passcode, dateRange.start, dateRange.end),
         loadStats(admin.passcode),
       ]);
     } catch (err) {
-      setRowError(err.message || "Could not delete the waiver.");
+      setRowError(err.message || "Could not update the waiver.");
     } finally {
       setRowBusy("");
+    }
+  }
+
+  async function toggleShowArchived() {
+    const next = !showArchived;
+    setShowArchived(next);
+    setRowNotice(null);
+    if (admin?.passcode) {
+      await loadWaivers(admin.passcode, dateRange.start, dateRange.end, next);
     }
   }
 
@@ -202,8 +219,8 @@ function AdminPage() {
     setStats(null);
     setStatsError("");
     setRowError("");
-    setRowNotice("");
-    setConfirmDelete(null);
+    setRowNotice(null);
+    setShowArchived(false);
     setAdminError("");
     setWaiversError("");
     setWaivers([]);
@@ -423,6 +440,14 @@ function AdminPage() {
                 <button type="submit" className="submit admin-refresh" disabled={waiversLoading}>
                   {waiversLoading ? "Loading..." : "Load Waivers"}
                 </button>
+                <label className="archived-toggle">
+                  <input
+                    type="checkbox"
+                    checked={showArchived}
+                    onChange={toggleShowArchived}
+                  />
+                  Show archived
+                </label>
               </form>
 
               {waiversError ? <p className="error">{waiversError}</p> : null}
@@ -436,10 +461,15 @@ function AdminPage() {
                       <button
                         key={row.id}
                         type="button"
-                        className={`waiver-row ${selectedWaiver?.id === row.id ? "is-selected" : ""}`}
+                        className={`waiver-row ${selectedWaiver?.id === row.id ? "is-selected" : ""} ${
+                          row.archived_at ? "is-archived" : ""
+                        }`}
                         onClick={() => setSelectedWaiver(row)}
                       >
-                        <strong>{row.name}</strong>
+                        <strong>
+                          {row.name}
+                          {row.archived_at ? <span className="badge-archived">Archived</span> : null}
+                        </strong>
                         <span>{row.email}</span>
                         <span>{toDisplayDate(row.submitted_at)}</span>
                       </button>
@@ -450,7 +480,12 @@ function AdminPage() {
                 <div className="waiver-detail">
                   {selectedWaiver ? (
                     <>
-                      <h3>{selectedWaiver.name}</h3>
+                      <h3>
+                        {selectedWaiver.name}
+                        {selectedWaiver.archived_at ? (
+                          <span className="badge-archived">Archived</span>
+                        ) : null}
+                      </h3>
                       <p>
                         <strong>Submitted:</strong> {toDisplayDate(selectedWaiver.submitted_at)}
                       </p>
@@ -525,47 +560,47 @@ function AdminPage() {
                               ? "Follow-up already sent"
                               : "Send follow-up now"}
                         </button>
-                        <button
-                          type="button"
-                          className="danger"
-                          disabled={rowBusy === `delete-${selectedWaiver.id}`}
-                          onClick={() => setConfirmDelete(selectedWaiver)}
-                        >
-                          Delete waiver
-                        </button>
+                        {selectedWaiver.archived_at ? (
+                          <button
+                            type="button"
+                            className="viz-toggle"
+                            disabled={rowBusy === `archive-${selectedWaiver.id}`}
+                            onClick={() => setArchived(selectedWaiver, false)}
+                          >
+                            {rowBusy === `archive-${selectedWaiver.id}`
+                              ? "Restoring..."
+                              : "Restore waiver"}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="danger"
+                            disabled={rowBusy === `archive-${selectedWaiver.id}`}
+                            onClick={() => setArchived(selectedWaiver, true)}
+                            title="Hide from the list and the charts. The signed waiver is kept."
+                          >
+                            {rowBusy === `archive-${selectedWaiver.id}`
+                              ? "Archiving..."
+                              : "Archive waiver"}
+                          </button>
+                        )}
                       </div>
 
-                      {confirmDelete?.id === selectedWaiver.id ? (
-                        <div className="confirm-box" role="alertdialog" aria-label="Confirm delete">
-                          <p>
-                            Permanently delete the signed waiver for{" "}
-                            <strong>{selectedWaiver.name}</strong>? This erases the signature
-                            and the signed record itself. It cannot be undone.
-                          </p>
-                          <div className="confirm-actions">
-                            <button
-                              type="button"
-                              className="danger"
-                              disabled={rowBusy === `delete-${selectedWaiver.id}`}
-                              onClick={() => deleteWaiver(selectedWaiver)}
-                            >
-                              {rowBusy === `delete-${selectedWaiver.id}`
-                                ? "Deleting..."
-                                : "Yes, delete permanently"}
-                            </button>
-                            <button
-                              type="button"
-                              className="viz-toggle"
-                              onClick={() => setConfirmDelete(null)}
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      ) : null}
-
                       {rowError ? <p className="error">{rowError}</p> : null}
-                      {rowNotice ? <p className="success">{rowNotice}</p> : null}
+                      {rowNotice ? (
+                        <p className="success">
+                          {rowNotice.text}
+                          {rowNotice.undo ? (
+                            <button
+                              type="button"
+                              className="link-button"
+                              onClick={() => setArchived(rowNotice.undo.row, rowNotice.undo.archived)}
+                            >
+                              Undo
+                            </button>
+                          ) : null}
+                        </p>
+                      ) : null}
 
                       <div className="signature-preview">
                         <p>

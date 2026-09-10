@@ -862,20 +862,48 @@ input[type="checkbox"] {
   cursor: not-allowed;
 }
 
-.confirm-box {
-  margin: 0.6rem 0 0;
-  padding: 0.75rem 0.9rem;
-  border: 1px solid rgba(255, 107, 117, 0.45);
-  border-radius: 10px;
-  background: rgba(255, 107, 117, 0.07);
-  font-size: 0.82rem;
+.badge-archived {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  vertical-align: middle;
 }
 
-.confirm-box p {
-  margin: 0 0 0.6rem;
+.waiver-row.is-archived strong,
+.waiver-row.is-archived span {
+  opacity: 0.6;
 }
 
-.confirm-box .confirm-actions {
+.archived-toggle {
   display: flex;
-  gap: 0.5rem;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  white-space: nowrap;
 }
+
+.archived-toggle input {
+  width: auto;
+  margin: 0;
+}
+
+.link-button {
+  background: none;
+  border: 0;
+  padding: 0;
+  margin-left: 0.5rem;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
