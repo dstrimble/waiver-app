@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { pool } from "../db.js";
 import { hashPasscode, verifyPasscode } from "../adminPasscode.js";
+import { sendFollowUpNow } from "../followUpEmails.js";
+import { getWaiverStats } from "../waiverStats.js";
 
 export const adminRouter = Router();
 
@@ -130,5 +132,76 @@ adminRouter.get("/waivers", requireAdmin, async (req, res) => {
   } catch (err) {
     console.error("Failed to load waivers:", err);
     return res.status(500).json({ error: "Could not load waivers." });
+  }
+});
+
+function parseId(value) {
+  const id = Number(value);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+/**
+ * Send the one-week follow-up immediately instead of waiting for the sweep.
+ *
+ * Shares the sweep's claim, so the automatic send is suppressed afterwards and
+ * the guest never receives two.
+ */
+adminRouter.post("/waivers/:id/followup", requireAdmin, async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid waiver id." });
+
+  try {
+    const result = await sendFollowUpNow(id);
+
+    switch (result.status) {
+      case "sent":
+        return res.json({ ok: true, sentTo: result.email });
+      case "already-sent":
+        return res
+          .status(409)
+          .json({ error: "A follow-up has already been sent for this waiver." });
+      case "not-found":
+        return res.status(404).json({ error: "Waiver not found." });
+      case "no-email":
+        return res.status(400).json({ error: "This waiver has no email address." });
+      case "no-smtp":
+        return res.status(503).json({ error: "SMTP is not configured, so no email was sent." });
+      default:
+        return res.status(500).json({ error: "Could not send the follow-up." });
+    }
+  } catch (err) {
+    console.error(`Manual follow-up for waiver ${id} failed:`, err);
+    // The claim was released, so the sweep can still pick this up later.
+    return res.status(502).json({ error: `Could not send the follow-up: ${err.message}` });
+  }
+});
+
+/** Permanently delete a waiver, signature and all. */
+adminRouter.delete("/waivers/:id", requireAdmin, async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid waiver id." });
+
+  try {
+    const { rows } = await pool.query(
+      "DELETE FROM waiver_submissions WHERE id = $1 RETURNING id, name",
+      [id]
+    );
+    if (!rows.length) return res.status(404).json({ error: "Waiver not found." });
+
+    console.warn(`Waiver ${id} (${rows[0].name}) was deleted by an admin.`);
+    return res.json({ ok: true, id: rows[0].id });
+  } catch (err) {
+    console.error(`Failed to delete waiver ${id}:`, err);
+    return res.status(500).json({ error: "Could not delete waiver." });
+  }
+});
+
+/** Aggregates for the admin charts - counted in SQL, never shipped row by row. */
+adminRouter.get("/stats", requireAdmin, async (_req, res) => {
+  try {
+    return res.json(await getWaiverStats());
+  } catch (err) {
+    console.error("Failed to build waiver stats:", err);
+    return res.status(500).json({ error: "Could not load stats." });
   }
 });

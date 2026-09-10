@@ -51,3 +51,23 @@ export function adminChangePasscode(passcode, payload) {
     body: JSON.stringify(payload),
   }).then(handle);
 }
+
+export function adminGetStats(passcode) {
+  return fetch("/api/admin/stats", {
+    headers: { "x-admin-passcode": passcode },
+  }).then(handle);
+}
+
+export function adminSendFollowUp(passcode, id) {
+  return fetch(`/api/admin/waivers/${id}/followup`, {
+    method: "POST",
+    headers: { "x-admin-passcode": passcode },
+  }).then(handle);
+}
+
+export function adminDeleteWaiver(passcode, id) {
+  return fetch(`/api/admin/waivers/${id}`, {
+    method: "DELETE",
+    headers: { "x-admin-passcode": passcode },
+  }).then(handle);
+}
