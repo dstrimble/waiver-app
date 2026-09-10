@@ -43,6 +43,7 @@ const CLAIM_DUE_SQL = `
         FROM waiver_submissions
        WHERE followup_sent_at IS NULL
          AND followup_eligible
+         AND archived_at IS NULL
          AND email IS NOT NULL
          AND submitted_at <= now() - make_interval(days => $1::int)
          AND submitted_at >  now() - make_interval(days => $2::int)
@@ -109,22 +110,71 @@ export async function sendDueFollowUps() {
   // follow-up batch is never in a hurry.
   for (const row of rows) {
     try {
-      await sendMail({
-        to: row.email,
-        replyTo: config.replyTo || config.notifyEmail || undefined,
-        ...buildFollowUpEmail({ id: row.id, name: row.name, email: row.email }, config),
-      });
-      await confirmClaim(row.id);
+      await deliverClaimed(row, config);
       sent += 1;
     } catch (err) {
-      const message = err?.message || String(err);
-      console.error(`Follow-up email for waiver ${row.id} failed: ${message}`);
-      await releaseClaim(row.id, message);
+      console.error(`Follow-up email for waiver ${row.id} failed: ${err.message}`);
       failed += 1;
     }
   }
 
   return { sent, failed };
+}
+
+/**
+ * Send to a row whose claim is already held, then settle the claim either way.
+ *
+ * The caller must have stamped `followup_sent_at` first - that stamp is the
+ * claim, and this releases it again if the send fails.
+ */
+async function deliverClaimed(row, config) {
+  try {
+    await sendMail({
+      to: row.email,
+      replyTo: config.replyTo || config.notifyEmail || undefined,
+      ...buildFollowUpEmail({ id: row.id, name: row.name, email: row.email }, config),
+    });
+    await confirmClaim(row.id);
+  } catch (err) {
+    const message = err?.message || String(err);
+    await releaseClaim(row.id, message);
+    throw new Error(message);
+  }
+}
+
+/**
+ * Send the follow-up to one waiver right now, at an admin's request.
+ *
+ * Deliberately ignores the delay, the grace window and `followup_eligible` -
+ * this is a person choosing to send it. It still goes through the same claim,
+ * so the automatic sweep will not send a second copy afterwards.
+ *
+ * @returns {Promise<{status: "sent"|"already-sent"|"not-found"|"no-email"|"archived"|"no-smtp", email?: string}>}
+ */
+export async function sendFollowUpNow(id) {
+  if (!isMailerConfigured()) return { status: "no-smtp" };
+
+  const existing = await pool.query(
+    "SELECT id, email, followup_sent_at, archived_at FROM waiver_submissions WHERE id = $1",
+    [id]
+  );
+  if (!existing.rows.length) return { status: "not-found" };
+  if (existing.rows[0].archived_at) return { status: "archived" };
+  if (!existing.rows[0].email) return { status: "no-email" };
+
+  // Claim conditionally, so a manual send racing the sweep cannot double up.
+  const claimed = await pool.query(
+    `UPDATE waiver_submissions
+        SET followup_sent_at = now()
+      WHERE id = $1 AND followup_sent_at IS NULL AND archived_at IS NULL
+      RETURNING id, name, email`,
+    [id]
+  );
+  if (!claimed.rows.length) return { status: "already-sent" };
+
+  const row = claimed.rows[0];
+  await deliverClaimed(row, getSiteConfig());
+  return { status: "sent", email: row.email };
 }
 
 let pollTimer = null;

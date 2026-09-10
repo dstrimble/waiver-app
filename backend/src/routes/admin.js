@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { pool } from "../db.js";
 import { hashPasscode, verifyPasscode } from "../adminPasscode.js";
+import { sendFollowUpNow } from "../followUpEmails.js";
+import { getWaiverStats } from "../waiverStats.js";
 
 export const adminRouter = Router();
 
@@ -98,9 +100,12 @@ adminRouter.get("/waivers", requireAdmin, async (req, res) => {
     return res.status(400).json({ error: "start must be on or before end." });
   }
 
+  const includeArchived = String(req.query.includeArchived || "") === "true";
+
   try {
     const filters = [];
     const params = [];
+    if (!includeArchived) filters.push("archived_at IS NULL");
     if (start) {
       params.push(start);
       filters.push(`submitted_at::date >= $${params.length}`);
@@ -118,7 +123,8 @@ adminRouter.get("/waivers", requireAdmin, async (req, res) => {
         other_gym_member, membership_expires, heard_about, looking_for,
         accepted, signature_name, signature_data_url,
         notification_sent_at, notification_error,
-        followup_sent_at, followup_error, followup_eligible
+        followup_sent_at, followup_error, followup_eligible,
+        archived_at
       FROM waiver_submissions
       ${whereClause}
       ORDER BY submitted_at DESC
@@ -130,5 +136,93 @@ adminRouter.get("/waivers", requireAdmin, async (req, res) => {
   } catch (err) {
     console.error("Failed to load waivers:", err);
     return res.status(500).json({ error: "Could not load waivers." });
+  }
+});
+
+function parseId(value) {
+  const id = Number(value);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+/**
+ * Send the one-week follow-up immediately instead of waiting for the sweep.
+ *
+ * Shares the sweep's claim, so the automatic send is suppressed afterwards and
+ * the guest never receives two.
+ */
+adminRouter.post("/waivers/:id/followup", requireAdmin, async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid waiver id." });
+
+  try {
+    const result = await sendFollowUpNow(id);
+
+    switch (result.status) {
+      case "sent":
+        return res.json({ ok: true, sentTo: result.email });
+      case "already-sent":
+        return res
+          .status(409)
+          .json({ error: "A follow-up has already been sent for this waiver." });
+      case "not-found":
+        return res.status(404).json({ error: "Waiver not found." });
+      case "no-email":
+        return res.status(400).json({ error: "This waiver has no email address." });
+      case "archived":
+        return res
+          .status(409)
+          .json({ error: "This waiver is archived. Restore it first to send a follow-up." });
+      case "no-smtp":
+        return res.status(503).json({ error: "SMTP is not configured, so no email was sent." });
+      default:
+        return res.status(500).json({ error: "Could not send the follow-up." });
+    }
+  } catch (err) {
+    console.error(`Manual follow-up for waiver ${id} failed:`, err);
+    // The claim was released, so the sweep can still pick this up later.
+    return res.status(502).json({ error: `Could not send the follow-up: ${err.message}` });
+  }
+});
+
+/**
+ * Archive or restore a waiver.
+ *
+ * Archiving takes the waiver out of the list, the charts and the follow-up
+ * queue but keeps the signed record itself - that record is the document the
+ * gym would rely on in a dispute, so nothing here destroys one.
+ */
+async function setArchived(req, res, archived) {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid waiver id." });
+
+  try {
+    const { rows } = await pool.query(
+      `UPDATE waiver_submissions
+          SET archived_at = ${archived ? "now()" : "NULL"}
+        WHERE id = $1
+        RETURNING id, name, archived_at`,
+      [id]
+    );
+    if (!rows.length) return res.status(404).json({ error: "Waiver not found." });
+
+    return res.json({ ok: true, id: rows[0].id, archivedAt: rows[0].archived_at });
+  } catch (err) {
+    console.error(`Failed to ${archived ? "archive" : "restore"} waiver ${id}:`, err);
+    return res
+      .status(500)
+      .json({ error: `Could not ${archived ? "archive" : "restore"} the waiver.` });
+  }
+}
+
+adminRouter.post("/waivers/:id/archive", requireAdmin, (req, res) => setArchived(req, res, true));
+adminRouter.post("/waivers/:id/restore", requireAdmin, (req, res) => setArchived(req, res, false));
+
+/** Aggregates for the admin charts - counted in SQL, never shipped row by row. */
+adminRouter.get("/stats", requireAdmin, async (_req, res) => {
+  try {
+    return res.json(await getWaiverStats());
+  } catch (err) {
+    console.error("Failed to build waiver stats:", err);
+    return res.status(500).json({ error: "Could not load stats." });
   }
 });

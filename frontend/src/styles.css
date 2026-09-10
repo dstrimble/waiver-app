@@ -11,6 +11,24 @@
   --line: #2f3844;
   --error: #ff6b75;
   --ok: #49cb87;
+
+  /* Chart tokens. The categorical four and the ordinal ramp were both run
+     through the data-viz validator against --viz-surface below: all pass the
+     lightness band, chroma floor, CVD separation, normal-vision floor and 3:1
+     contrast. Re-run the validator before changing any of them. */
+  --viz-surface: #1a212b;
+  --viz-grid: #2f3844;
+  --viz-axis: #8b94a2;
+  --viz-1: #3987e5;
+  --viz-2: #d95926;
+  --viz-3: #199e70;
+  --viz-4: #c98500;
+  --viz-ord-1: #cde2fb;
+  --viz-ord-2: #9ec5f4;
+  --viz-ord-3: #6da7ec;
+  --viz-ord-4: #3987e5;
+  --viz-ord-5: #1c5cab;
+  --viz-neutral: #6b7686;
 }
 
 * {
@@ -547,3 +565,345 @@ input[type="checkbox"] {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---------------------------------------------------------------- */
+/* Charts                                                            */
+/* Marks carry the data colour; every piece of text wears an ink     */
+/* token, so identity is never colour-on-text.                       */
+/* ---------------------------------------------------------------- */
+
+.viz-dashboard {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1.4rem;
+}
+
+.viz-two-up {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.viz-card {
+  background: var(--viz-surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 1rem 1.1rem 1.2rem;
+}
+
+.viz-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.35rem;
+}
+
+.viz-head h3 {
+  font-family: "Oswald", sans-serif;
+  font-size: 1rem;
+  letter-spacing: 0.02em;
+  margin: 0;
+}
+
+.viz-sub {
+  margin: 0.2rem 0 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.viz-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.viz-toggle,
+.viz-segmented button {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 0.25rem 0.7rem;
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.viz-toggle:hover,
+.viz-segmented button:hover {
+  color: var(--ink);
+  border-color: var(--muted);
+}
+
+.viz-segmented {
+  display: inline-flex;
+  gap: 0.25rem;
+}
+
+.viz-segmented button.is-active {
+  background: rgba(57, 135, 229, 0.16);
+  border-color: var(--viz-1);
+  color: var(--ink);
+}
+
+.viz-range {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.viz-plot {
+  position: relative;
+  width: 100%;
+}
+
+.viz-plot svg {
+  display: block;
+  overflow: visible;
+}
+
+.viz-gridline {
+  stroke: var(--viz-grid);
+  stroke-width: 1;
+}
+
+.viz-crosshair {
+  stroke: var(--viz-axis);
+  stroke-width: 1;
+  opacity: 0.55;
+}
+
+.viz-line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* The closing, still-incomplete period - dashed so it never reads as a drop. */
+.viz-line-partial {
+  stroke-dasharray: 4 4;
+  opacity: 0.75;
+}
+
+.viz-area {
+  opacity: 0.1;
+  stroke: none;
+}
+
+.viz-marker {
+  stroke: var(--viz-surface);
+  stroke-width: 2;
+}
+
+.viz-axis-label {
+  fill: var(--muted);
+  font-size: 11px;
+  font-family: "Barlow", sans-serif;
+}
+
+.viz-cat-label {
+  fill: var(--ink);
+  font-size: 12px;
+  font-family: "Barlow", sans-serif;
+}
+
+.viz-point-label {
+  fill: var(--ink);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: "Barlow", sans-serif;
+}
+
+/* Hovering one mark recedes the rest rather than recolouring anything. */
+.viz-dim {
+  opacity: 0.35;
+  transition: opacity 90ms ease;
+}
+
+.viz-tooltip {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  white-space: nowrap;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+
+.viz-tooltip strong {
+  display: block;
+  font-weight: 600;
+}
+
+.viz-tooltip span {
+  color: var(--muted);
+}
+
+.viz-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  list-style: none;
+  margin: 0 0 0.6rem;
+  padding: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.viz-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.viz-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex: none;
+}
+
+.viz-tiles {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.viz-tile {
+  background: var(--viz-surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.9rem 1rem;
+}
+
+.viz-tile-value {
+  font-family: "Oswald", sans-serif;
+  font-size: 1.9rem;
+  line-height: 1.1;
+  margin: 0;
+}
+
+.viz-tile-label {
+  margin: 0.15rem 0 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.viz-tile-note {
+  margin: 0.3rem 0 0;
+  font-size: 0.72rem;
+  color: var(--muted);
+  opacity: 0.8;
+}
+
+.viz-table-wrap {
+  overflow-x: auto;
+  max-height: 320px;
+}
+
+.viz-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.viz-table th,
+.viz-table td {
+  text-align: left;
+  padding: 0.35rem 0.6rem 0.35rem 0;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.viz-table th {
+  color: var(--muted);
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+  background: var(--viz-surface);
+}
+
+/* Destructive and one-off actions in the waiver detail panel. */
+.waiver-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 1rem 0 0.4rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--line);
+}
+
+.danger {
+  background: transparent;
+  border: 1px solid rgba(255, 107, 117, 0.5);
+  color: var(--error);
+  border-radius: 999px;
+  padding: 0.4rem 0.9rem;
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.danger:hover:not(:disabled) {
+  background: rgba(255, 107, 117, 0.12);
+  border-color: var(--error);
+}
+
+.danger:disabled,
+.viz-toggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.badge-archived {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  vertical-align: middle;
+}
+
+.waiver-row.is-archived strong,
+.waiver-row.is-archived span {
+  opacity: 0.6;
+}
+
+.archived-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.archived-toggle input {
+  width: auto;
+  margin: 0;
+}
+
+.link-button {
+  background: none;
+  border: 0;
+  padding: 0;
+  margin-left: 0.5rem;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+

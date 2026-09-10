@@ -387,6 +387,8 @@ describe("one-week follow-up email", () => {
     expect(claimParams).toEqual([7, 10, 50]);
     // Waivers signed before the feature shipped are never picked up.
     expect(claimSql).toMatch(/AND followup_eligible/);
+    // Nor are archived ones.
+    expect(claimSql).toMatch(/archived_at IS NULL/);
   });
 
   it("releases the claim so a failed send is retried next sweep", async () => {
@@ -427,6 +429,226 @@ describe("one-week follow-up email", () => {
       delayDays: 14,
       graceDays: 1,
     });
+  });
+});
+
+describe("admin waiver actions", () => {
+  beforeEach(() => {
+    queryMock.mockReset();
+    sendMailMock.mockReset();
+    sendMailMock.mockResolvedValue({ messageId: "<abc@local>", accepted: [], rejected: [] });
+    process.env.ADMIN_PASSCODE = "changeme";
+  });
+
+  const auth = (req) => req.set("x-admin-passcode", "changeme");
+
+  it("archives a waiver without destroying the signed record", async () => {
+    queryMock.mockResolvedValueOnce({
+      rows: [{ id: 12, name: "Jane Doe", archived_at: new Date() }],
+    });
+
+    const res = await auth(request(createApp()).post("/api/admin/waivers/12/archive"));
+
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    const [sql, params] = queryMock.mock.calls[0];
+    // A signed waiver is evidence: archiving must never issue a DELETE.
+    expect(sql).not.toMatch(/DELETE/i);
+    expect(sql).toMatch(/SET\s+archived_at = now\(\)/);
+    expect(params).toEqual([12]);
+  });
+
+  it("restores an archived waiver by clearing the column", async () => {
+    queryMock.mockResolvedValueOnce({ rows: [{ id: 12, name: "Jane Doe", archived_at: null }] });
+
+    const res = await auth(request(createApp()).post("/api/admin/waivers/12/restore"));
+
+    expect(res.status).toBe(200);
+    expect(res.body.archivedAt).toBeNull();
+    expect(queryMock.mock.calls[0][0]).toMatch(/SET\s+archived_at = NULL/);
+  });
+
+  it("404s when archiving a waiver that is not there", async () => {
+    queryMock.mockResolvedValueOnce({ rows: [] });
+
+    const res = await auth(request(createApp()).post("/api/admin/waivers/999/archive"));
+
+    expect(res.status).toBe(404);
+  });
+
+  it("rejects a non-numeric id", async () => {
+    const res = await auth(request(createApp()).post("/api/admin/waivers/abc/archive"));
+
+    expect(res.status).toBe(400);
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+
+  it("hides archived waivers from the list unless asked", async () => {
+    const app = createApp();
+    queryMock.mockResolvedValue({ rows: [] });
+
+    await auth(request(app).get("/api/admin/waivers"));
+    expect(queryMock.mock.calls[0][0]).toMatch(/archived_at IS NULL/);
+
+    queryMock.mockClear();
+    await auth(request(app).get("/api/admin/waivers?includeArchived=true"));
+    expect(queryMock.mock.calls[0][0]).not.toMatch(/archived_at IS NULL/);
+  });
+
+  it("refuses to send a follow-up for an archived waiver", async () => {
+    queryMock.mockResolvedValueOnce({
+      rows: [{ id: 13, email: "jane@example.com", followup_sent_at: null, archived_at: new Date() }],
+    });
+
+    const res = await auth(request(createApp()).post("/api/admin/waivers/13/followup"));
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/archived/i);
+    expect(sendMailMock).not.toHaveBeenCalled();
+  });
+
+  it("admin routes still require the passcode", async () => {
+    const app = createApp();
+    queryMock.mockResolvedValue({ rows: [] });
+
+    const archive = await request(app).post("/api/admin/waivers/1/archive");
+    const restore = await request(app).post("/api/admin/waivers/1/restore");
+    const send = await request(app).post("/api/admin/waivers/1/followup");
+    const stats = await request(app).get("/api/admin/stats");
+
+    expect([archive.status, restore.status, send.status, stats.status]).toEqual([401, 401, 401, 401]);
+  });
+
+  it("POST /followup sends immediately and claims the row so the sweep will not", async () => {
+    queryMock.mockImplementation((sql) => {
+      if (sql.includes("SELECT id, email, followup_sent_at")) {
+        return Promise.resolve({ rows: [{ id: 5, email: "jane@example.com", followup_sent_at: null, archived_at: null }] });
+      }
+      if (sql.includes("followup_sent_at = now()")) {
+        return Promise.resolve({ rows: [{ id: 5, name: "Jane Doe", email: "jane@example.com" }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+
+    const res = await auth(request(createApp()).post("/api/admin/waivers/5/followup"));
+
+    expect(res.status).toBe(200);
+    expect(res.body.sentTo).toBe("jane@example.com");
+    expect(sendMailMock).toHaveBeenCalledTimes(1);
+    expect(sendMailMock.mock.calls[0][0].subject).toMatch(/free trial week/i);
+
+    // The claim is what suppresses the automatic send a week later.
+    const claim = queryMock.mock.calls.find(([sql]) => sql.includes("followup_sent_at = now()"));
+    expect(claim[0]).toMatch(/followup_sent_at IS NULL/);
+    expect(claim[1]).toEqual([5]);
+  });
+
+  it("POST /followup ignores the delay window and eligibility", async () => {
+    queryMock.mockImplementation((sql) => {
+      if (sql.includes("SELECT id, email, followup_sent_at")) {
+        return Promise.resolve({ rows: [{ id: 6, email: "old@example.com", followup_sent_at: null, archived_at: null }] });
+      }
+      if (sql.includes("followup_sent_at = now()")) {
+        return Promise.resolve({ rows: [{ id: 6, name: "Old Signer", email: "old@example.com" }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+
+    const res = await auth(request(createApp()).post("/api/admin/waivers/6/followup"));
+
+    expect(res.status).toBe(200);
+    // An admin pressing the button is not subject to submitted_at or eligibility.
+    const claim = queryMock.mock.calls.find(([sql]) => sql.includes("followup_sent_at = now()"));
+    expect(claim[0]).not.toMatch(/submitted_at/);
+    expect(claim[0]).not.toMatch(/followup_eligible/);
+  });
+
+  it("POST /followup refuses to send a second copy", async () => {
+    queryMock.mockImplementation((sql) => {
+      if (sql.includes("SELECT id, email, followup_sent_at")) {
+        return Promise.resolve({
+          rows: [{ id: 7, email: "jane@example.com", followup_sent_at: new Date(), archived_at: null }],
+        });
+      }
+      // The conditional claim matches nothing once the row is stamped.
+      return Promise.resolve({ rows: [] });
+    });
+
+    const res = await auth(request(createApp()).post("/api/admin/waivers/7/followup"));
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/already been sent/i);
+    expect(sendMailMock).not.toHaveBeenCalled();
+  });
+
+  it("POST /followup releases the claim when the send fails", async () => {
+    queryMock.mockImplementation((sql) => {
+      if (sql.includes("SELECT id, email, followup_sent_at")) {
+        return Promise.resolve({ rows: [{ id: 8, email: "jane@example.com", followup_sent_at: null, archived_at: null }] });
+      }
+      if (sql.includes("followup_sent_at = now()")) {
+        return Promise.resolve({ rows: [{ id: 8, name: "Jane Doe", email: "jane@example.com" }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    sendMailMock.mockRejectedValue(new Error("smtp is down"));
+
+    const res = await auth(request(createApp()).post("/api/admin/waivers/8/followup"));
+
+    expect(res.status).toBe(502);
+    // Released, so the weekly sweep can still try again.
+    const release = queryMock.mock.calls.find(([sql]) => sql.includes("followup_sent_at = NULL"));
+    expect(release[1]).toEqual([8, "smtp is down"]);
+  });
+
+  it("POST /followup 400s when the waiver has no email", async () => {
+    queryMock.mockResolvedValueOnce({ rows: [{ id: 9, email: null, followup_sent_at: null, archived_at: null }] });
+
+    const res = await auth(request(createApp()).post("/api/admin/waivers/9/followup"));
+
+    expect(res.status).toBe(400);
+    expect(sendMailMock).not.toHaveBeenCalled();
+  });
+
+  it("GET /api/admin/stats aggregates without shipping signature images", async () => {
+    queryMock.mockImplementation((sql) => {
+      if (sql.includes("all_time")) {
+        return Promise.resolve({
+          rows: [{ all_time: 3, last_30: 2, last_7: 1, followups_sent: 1, followups_pending: 2 }],
+        });
+      }
+      if (sql.includes("unnest(interests)")) {
+        return Promise.resolve({ rows: [{ day: "2026-09-01", interest: "BJJ", count: 2 }] });
+      }
+      if (sql.includes("mode() WITHIN GROUP")) {
+        return Promise.resolve({ rows: [{ label: "Facebook", count: 3 }] });
+      }
+      if (sql.includes("date_of_birth")) {
+        return Promise.resolve({ rows: [{ band: "18-29", count: 3 }] });
+      }
+      if (sql.includes("isodow")) {
+        return Promise.resolve({ rows: [{ dow: 1, count: 3 }] });
+      }
+      return Promise.resolve({ rows: [{ day: "2026-09-01", count: 3 }] });
+    });
+
+    const res = await auth(request(createApp()).get("/api/admin/stats"));
+
+    expect(res.status).toBe(200);
+    expect(res.body.totals.allTime).toBe(3);
+    expect(res.body.daily).toEqual([{ day: "2026-09-01", count: 3 }]);
+    // Fixed-order, zero-filled bands so the chart never invents a category.
+    expect(res.body.ageBands.map((b) => b.band)).toEqual([
+      "Under 13", "13-17", "18-29", "30-44", "45+", "Unknown",
+    ]);
+    expect(res.body.ageBands.find((b) => b.band === "13-17").count).toBe(0);
+    expect(res.body.weekday).toHaveLength(7);
+    expect(res.body.weekday[0]).toEqual({ label: "Mon", count: 3 });
+
+    // No query may drag the base64 signature across the wire.
+    for (const [sql] of queryMock.mock.calls) {
+      expect(sql).not.toMatch(/signature_data_url/);
+    }
   });
 });
 

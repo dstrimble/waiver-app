@@ -20,6 +20,8 @@ A standalone waiver submission app with e-signature support.
 - Signed waiver emailed as a PDF to the gym and to the person who signed
 - Follow-up instructions for signing up and managing an account
 - Automatic "how was your trial week?" email a week after signing
+- Admin dashboard: signup trends, interest mix, referral sources, age bands
+- Admin can send the trial follow-up early, or archive a waiver
 - Admin listing endpoint secured by passcode header
 
 ## Run Locally With Docker
@@ -49,6 +51,12 @@ npm run dev
 - `GET /api/waivers/text` - waiver copy rendered by the public form
 - `POST /api/waivers` - submit a waiver
 - `GET /api/admin/waivers` - list submissions (requires `x-admin-passcode`)
+- `GET /api/admin/stats` - aggregates for the admin charts
+- `POST /api/admin/waivers/:id/followup` - send the trial follow-up now
+- `POST /api/admin/waivers/:id/archive` - hide a waiver, keeping the record
+- `POST /api/admin/waivers/:id/restore` - bring an archived waiver back
+
+All `/api/admin/*` routes require the `x-admin-passcode` header.
 
 ## Waiver Confirmation Emails
 
@@ -156,6 +164,62 @@ down for a while - a month-late "how was your trial week?" helps nobody.
 Sending reuses the same SMTP settings and links as the confirmation email; with
 SMTP unset the sweep logs a warning and does nothing. Docker Compose ships with
 `FOLLOWUP_ENABLED=false` so a local database of old waivers cannot mail anyone.
+
+## Admin Dashboard
+
+Unlocking the admin page loads a set of charts above the waiver list:
+
+- **Headline tiles** - waivers all time, last 30 days, last 7 days, and how many
+  follow-ups have gone out (with the number still awaiting their week).
+- **Waivers signed over time** - a line, weekly or monthly, over 90 days / 12
+  months / all time. The closing period is usually incomplete, so it is drawn
+  dashed and labelled "to date" rather than looking like a collapse.
+- **Interests over time** - stacked columns per class. This counts *selections*,
+  not people: one waiver can tick several classes, so the stack totals run
+  higher than the waiver count. The chart says so under its title.
+- **How they heard about us** - the free-text field, grouped ignoring case
+  (`Facebook`/`facebook`/`FACEBOOK` become one bar) and showing whichever
+  spelling was most common. "Not specified" and the folded tail sit in neutral
+  grey so they do not compete with real referral sources.
+- **Age when signing** and **which day people sign** - useful for programming
+  kids' classes and for staffing the front desk.
+
+Every chart has a "Show data" toggle that swaps it for the underlying table, so
+nothing is locked behind colour or hover.
+
+The colours come from the `--viz-*` tokens in `frontend/src/styles.css` and were
+run through a contrast/colour-vision validator against the chart surface - the
+comment above them says so. Re-run it if you change them.
+
+Aggregates are computed in SQL by `backend/src/waiverStats.js` and served from
+`GET /api/admin/stats`. That endpoint deliberately returns counts only: the
+waiver rows carry a base64 signature image each, which has no business crossing
+the wire to draw a chart. Archived waivers are excluded from every figure.
+
+### Sending a follow-up early, and archiving
+
+Selecting a waiver reveals two actions:
+
+**Send follow-up now** emails the trial follow-up immediately instead of waiting
+out the week - handy for someone who is ready to join, or to reach a waiver
+signed before the feature existed. It claims the row exactly as the automatic
+sweep does, so **the automatic send is cancelled and nobody receives two**. The
+button disables itself once a follow-up has gone out.
+
+**Archive waiver** takes a waiver out of circulation without destroying it. An
+archived waiver disappears from the list, drops out of every chart, and is
+skipped by the follow-up sweep - but the signed record and its signature stay in
+the database, because that record is the document you would rely on in a
+dispute. Nothing in the app issues a `DELETE` against a waiver.
+
+Archiving is one click and reversible: the confirmation message carries an Undo,
+"Show archived" in the filter bar brings archived waivers back into the list
+marked with a badge, and **Restore waiver** returns one to normal. Under the
+hood it is a single `archived_at` timestamp; restoring clears it.
+
+If you ever need a genuine erasure - someone asking for their data to be removed
+outright - that is a deliberate database operation, not something the admin page
+can do by accident.
 
 ## Waiver Text
 
