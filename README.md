@@ -21,7 +21,7 @@ A standalone waiver submission app with e-signature support.
 - Follow-up instructions for signing up and managing an account
 - Automatic "how was your trial week?" email a week after signing
 - Admin dashboard: signup trends, interest mix, referral sources, age bands
-- Admin can send the trial follow-up early, or delete a waiver
+- Admin can send the trial follow-up early, or archive a waiver
 - Admin listing endpoint secured by passcode header
 
 ## Run Locally With Docker
@@ -53,7 +53,8 @@ npm run dev
 - `GET /api/admin/waivers` - list submissions (requires `x-admin-passcode`)
 - `GET /api/admin/stats` - aggregates for the admin charts
 - `POST /api/admin/waivers/:id/followup` - send the trial follow-up now
-- `DELETE /api/admin/waivers/:id` - permanently delete a waiver
+- `POST /api/admin/waivers/:id/archive` - hide a waiver, keeping the record
+- `POST /api/admin/waivers/:id/restore` - bring an archived waiver back
 
 All `/api/admin/*` routes require the `x-admin-passcode` header.
 
@@ -193,9 +194,9 @@ comment above them says so. Re-run it if you change them.
 Aggregates are computed in SQL by `backend/src/waiverStats.js` and served from
 `GET /api/admin/stats`. That endpoint deliberately returns counts only: the
 waiver rows carry a base64 signature image each, which has no business crossing
-the wire to draw a chart.
+the wire to draw a chart. Archived waivers are excluded from every figure.
 
-### Sending a follow-up early, and deleting
+### Sending a follow-up early, and archiving
 
 Selecting a waiver reveals two actions:
 
@@ -205,11 +206,20 @@ signed before the feature existed. It claims the row exactly as the automatic
 sweep does, so **the automatic send is cancelled and nobody receives two**. The
 button disables itself once a follow-up has gone out.
 
-**Delete waiver** permanently removes the row, signature and all, behind a
-confirmation step. There is no undo and no soft-delete: once it is gone, the
-signed record is gone. Bear in mind a signed waiver is the document you would
-rely on in a dispute, so delete test entries and duplicates rather than
-housekeeping real ones.
+**Archive waiver** takes a waiver out of circulation without destroying it. An
+archived waiver disappears from the list, drops out of every chart, and is
+skipped by the follow-up sweep - but the signed record and its signature stay in
+the database, because that record is the document you would rely on in a
+dispute. Nothing in the app issues a `DELETE` against a waiver.
+
+Archiving is one click and reversible: the confirmation message carries an Undo,
+"Show archived" in the filter bar brings archived waivers back into the list
+marked with a badge, and **Restore waiver** returns one to normal. Under the
+hood it is a single `archived_at` timestamp; restoring clears it.
+
+If you ever need a genuine erasure - someone asking for their data to be removed
+outright - that is a deliberate database operation, not something the admin page
+can do by accident.
 
 ## Waiver Text
 

@@ -17,11 +17,13 @@ const TOTALS_SQL = `
     count(*) FILTER (WHERE followup_sent_at IS NOT NULL)::int                  AS followups_sent,
     count(*) FILTER (WHERE followup_sent_at IS NULL AND followup_eligible)::int AS followups_pending,
     min(submitted_at)                                                         AS first_signed_at
-  FROM waiver_submissions`;
+  FROM waiver_submissions
+  WHERE archived_at IS NULL`;
 
 const DAILY_SQL = `
   SELECT (submitted_at AT TIME ZONE $1)::date::text AS day, count(*)::int AS count
     FROM waiver_submissions
+   WHERE archived_at IS NULL
    GROUP BY 1
    ORDER BY 1`;
 
@@ -33,6 +35,7 @@ const DAILY_BY_INTEREST_SQL = `
       SELECT (submitted_at AT TIME ZONE $1)::date::text AS day,
              unnest(interests) AS interest
         FROM waiver_submissions
+       WHERE archived_at IS NULL
     ) AS spread
    GROUP BY 1, 2
    ORDER BY 1, 2`;
@@ -43,6 +46,7 @@ const HEARD_ABOUT_SQL = `
   SELECT COALESCE(mode() WITHIN GROUP (ORDER BY NULLIF(btrim(heard_about), '')), 'Not specified') AS label,
          count(*)::int AS count
     FROM waiver_submissions
+   WHERE archived_at IS NULL
    GROUP BY lower(COALESCE(NULLIF(btrim(heard_about), ''), 'not specified'))
    ORDER BY count DESC, label`;
 
@@ -59,12 +63,14 @@ const AGE_BANDS_SQL = `
                ELSE '45+'
              END AS band
         FROM waiver_submissions
+       WHERE archived_at IS NULL
     ) AS banded
    GROUP BY 1`;
 
 const WEEKDAY_SQL = `
   SELECT extract(isodow FROM (submitted_at AT TIME ZONE $1))::int AS dow, count(*)::int AS count
     FROM waiver_submissions
+   WHERE archived_at IS NULL
    GROUP BY 1`;
 
 /**
@@ -73,6 +79,9 @@ const WEEKDAY_SQL = `
  * Deliberately returns counts rather than rows: the waiver table carries a
  * base64 signature image per row, which has no business crossing the wire to
  * draw a line chart.
+ *
+ * Archived waivers are excluded throughout - archiving a duplicate or a test
+ * entry should take it out of the numbers, not just out of the list.
  */
 export async function getWaiverStats() {
   const tz = displayTimezone();

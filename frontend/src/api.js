@@ -31,10 +31,11 @@ export function verifyAdmin(passcode) {
   }).then(handle);
 }
 
-export function adminGetWaivers(passcode, { start, end } = {}) {
+export function adminGetWaivers(passcode, { start, end, includeArchived } = {}) {
   const params = new URLSearchParams();
   if (start) params.set("start", start);
   if (end) params.set("end", end);
+  if (includeArchived) params.set("includeArchived", "true");
   const query = params.toString();
   return fetch(`/api/admin/waivers${query ? `?${query}` : ""}`, {
     headers: { "x-admin-passcode": passcode },
@@ -65,9 +66,9 @@ export function adminSendFollowUp(passcode, id) {
   }).then(handle);
 }
 
-export function adminDeleteWaiver(passcode, id) {
-  return fetch(`/api/admin/waivers/${id}`, {
-    method: "DELETE",
+export function adminArchiveWaiver(passcode, id, archived) {
+  return fetch(`/api/admin/waivers/${id}/${archived ? "archive" : "restore"}`, {
+    method: "POST",
     headers: { "x-admin-passcode": passcode },
   }).then(handle);
 }
