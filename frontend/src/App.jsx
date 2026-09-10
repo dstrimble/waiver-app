@@ -1,12 +1,25 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   adminChangePasscode,
+  adminDeleteWaiver,
+  adminGetStats,
   adminGetWaivers,
+  adminSendFollowUp,
   getWaiverText,
   submitWaiver,
   verifyAdmin,
 } from "./api.js";
 import SignaturePad from "./components/SignaturePad.jsx";
+import {
+  CategoryColumns,
+  InterestMix,
+  RankedBars,
+  SignupsOverTime,
+  StatTiles,
+  bucketByInterest,
+  bucketDaily,
+  foldTail,
+} from "./components/Charts.jsx";
 
 const INTERESTS = ["BJJ", "Kickboxing", "MMA", "Kids Classes"];
 
@@ -65,6 +78,14 @@ function AdminPage() {
   const [changeError, setChangeError] = useState("");
   const [changeSuccess, setChangeSuccess] = useState("");
   const [showChangePassword, setShowChangePassword] = useState(false);
+  const [stats, setStats] = useState(null);
+  const [statsError, setStatsError] = useState("");
+  const [granularity, setGranularity] = useState("month");
+  const [rangeDays, setRangeDays] = useState(365);
+  const [rowBusy, setRowBusy] = useState("");
+  const [rowError, setRowError] = useState("");
+  const [rowNotice, setRowNotice] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(null);
   const [changeForm, setChangeForm] = useState({
     currentPasscode: "",
     newPasscode: "",
@@ -90,7 +111,10 @@ function AdminPage() {
       await verifyAdmin(passcodeInput);
       setAdmin({ passcode: passcodeInput });
       setPasscodeInput("");
-      await loadWaivers(passcodeInput, dateRange.start, dateRange.end);
+      await Promise.all([
+        loadWaivers(passcodeInput, dateRange.start, dateRange.end),
+        loadStats(passcodeInput),
+      ]);
     } catch (err) {
       setAdminError(err.message || "Could not unlock admin.");
     } finally {
@@ -115,15 +139,71 @@ function AdminPage() {
     }
   }
 
+  async function loadStats(passcode) {
+    setStatsError("");
+    try {
+      setStats(await adminGetStats(passcode));
+    } catch (err) {
+      setStatsError(err.message || "Failed to load stats.");
+    }
+  }
+
   async function runDateFilter(e) {
     e.preventDefault();
     if (!admin?.passcode) return;
     await loadWaivers(admin.passcode, dateRange.start, dateRange.end);
   }
 
+  // Sending by hand claims the waiver the same way the weekly sweep does, so
+  // the automatic follow-up is suppressed and nobody receives two.
+  async function sendFollowUpNow(row) {
+    if (!admin?.passcode) return;
+    setRowBusy(`followup-${row.id}`);
+    setRowError("");
+    setRowNotice("");
+    try {
+      const result = await adminSendFollowUp(admin.passcode, row.id);
+      setRowNotice(`Follow-up sent to ${result.sentTo}. The automatic one is now cancelled.`);
+      await Promise.all([
+        loadWaivers(admin.passcode, dateRange.start, dateRange.end),
+        loadStats(admin.passcode),
+      ]);
+    } catch (err) {
+      setRowError(err.message || "Could not send the follow-up.");
+    } finally {
+      setRowBusy("");
+    }
+  }
+
+  async function deleteWaiver(row) {
+    if (!admin?.passcode) return;
+    setRowBusy(`delete-${row.id}`);
+    setRowError("");
+    setRowNotice("");
+    try {
+      await adminDeleteWaiver(admin.passcode, row.id);
+      setConfirmDelete(null);
+      setRowNotice(`Deleted the waiver for ${row.name}.`);
+      setSelectedWaiver(null);
+      await Promise.all([
+        loadWaivers(admin.passcode, dateRange.start, dateRange.end),
+        loadStats(admin.passcode),
+      ]);
+    } catch (err) {
+      setRowError(err.message || "Could not delete the waiver.");
+    } finally {
+      setRowBusy("");
+    }
+  }
+
   function exitAdmin() {
     setAdmin(null);
     setPasscodeInput("");
+    setStats(null);
+    setStatsError("");
+    setRowError("");
+    setRowNotice("");
+    setConfirmDelete(null);
     setAdminError("");
     setWaiversError("");
     setWaivers([]);
@@ -164,6 +244,19 @@ function AdminPage() {
   function updateChangeField(key, value) {
     setChangeForm((current) => ({ ...current, [key]: value }));
   }
+
+  const timeline = useMemo(
+    () => (stats ? bucketDaily(stats.daily, granularity, rangeDays) : []),
+    [stats, granularity, rangeDays]
+  );
+  const interestBuckets = useMemo(
+    () => (stats ? bucketByInterest(stats.dailyByInterest, granularity, rangeDays) : []),
+    [stats, granularity, rangeDays]
+  );
+  const heardAboutRows = useMemo(
+    () => (stats ? foldTail(stats.heardAbout) : []),
+    [stats]
+  );
 
   return (
     <main className="page">
@@ -237,6 +330,72 @@ function AdminPage() {
               ) : null}
               {changeError ? <p className="error">{changeError}</p> : null}
               {changeSuccess ? <p className="success">{changeSuccess}</p> : null}
+
+              {statsError ? <p className="error">{statsError}</p> : null}
+
+              {stats ? (
+                <div className="viz-dashboard">
+                  <StatTiles
+                    tiles={[
+                      { label: "Waivers all time", value: stats.totals.allTime },
+                      { label: "Last 30 days", value: stats.totals.last30 },
+                      { label: "Last 7 days", value: stats.totals.last7 },
+                      {
+                        label: "Follow-ups sent",
+                        value: stats.totals.followUpsSent,
+                        note: `${stats.totals.followUpsPending} awaiting their week`,
+                      },
+                    ]}
+                  />
+
+                  <div className="viz-range" role="group" aria-label="Chart range">
+                    <div className="viz-segmented">
+                      {[
+                        { days: 90, label: "90 days" },
+                        { days: 365, label: "12 months" },
+                        { days: 0, label: "All time" },
+                      ].map((option) => (
+                        <button
+                          key={option.label}
+                          type="button"
+                          className={rangeDays === option.days ? "is-active" : ""}
+                          onClick={() => setRangeDays(option.days)}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <SignupsOverTime
+                    points={timeline}
+                    granularity={granularity}
+                    onGranularity={setGranularity}
+                  />
+
+                  <InterestMix buckets={interestBuckets} />
+
+                  <div className="viz-two-up">
+                    <RankedBars
+                      title="How they heard about us"
+                      subtitle="Typed by hand on the form, grouped ignoring case"
+                      rows={heardAboutRows}
+                    />
+                    <CategoryColumns
+                      title="Age when signing"
+                      subtitle="From date of birth on the waiver"
+                      rows={stats.ageBands.map((b) => ({ label: b.band, count: b.count }))}
+                      ordered
+                    />
+                  </div>
+
+                  <CategoryColumns
+                    title="Which day people sign"
+                    subtitle={`All waivers, ${stats.timezone.replace("_", " ")}`}
+                    rows={stats.weekday}
+                  />
+                </div>
+              ) : null}
 
               <form className="admin-filters" onSubmit={runDateFilter}>
                 <label>
@@ -343,6 +502,70 @@ function AdminPage() {
                               ? `Not sent - ${selectedWaiver.followup_error}`
                               : "Not sent yet"}
                       </p>
+
+                      <div className="waiver-actions">
+                        <button
+                          type="button"
+                          className="viz-toggle"
+                          disabled={
+                            rowBusy === `followup-${selectedWaiver.id}` ||
+                            Boolean(selectedWaiver.followup_sent_at) ||
+                            !selectedWaiver.email
+                          }
+                          onClick={() => sendFollowUpNow(selectedWaiver)}
+                          title={
+                            selectedWaiver.followup_sent_at
+                              ? "A follow-up has already gone out for this waiver."
+                              : "Send the trial follow-up now and cancel the automatic one."
+                          }
+                        >
+                          {rowBusy === `followup-${selectedWaiver.id}`
+                            ? "Sending..."
+                            : selectedWaiver.followup_sent_at
+                              ? "Follow-up already sent"
+                              : "Send follow-up now"}
+                        </button>
+                        <button
+                          type="button"
+                          className="danger"
+                          disabled={rowBusy === `delete-${selectedWaiver.id}`}
+                          onClick={() => setConfirmDelete(selectedWaiver)}
+                        >
+                          Delete waiver
+                        </button>
+                      </div>
+
+                      {confirmDelete?.id === selectedWaiver.id ? (
+                        <div className="confirm-box" role="alertdialog" aria-label="Confirm delete">
+                          <p>
+                            Permanently delete the signed waiver for{" "}
+                            <strong>{selectedWaiver.name}</strong>? This erases the signature
+                            and the signed record itself. It cannot be undone.
+                          </p>
+                          <div className="confirm-actions">
+                            <button
+                              type="button"
+                              className="danger"
+                              disabled={rowBusy === `delete-${selectedWaiver.id}`}
+                              onClick={() => deleteWaiver(selectedWaiver)}
+                            >
+                              {rowBusy === `delete-${selectedWaiver.id}`
+                                ? "Deleting..."
+                                : "Yes, delete permanently"}
+                            </button>
+                            <button
+                              type="button"
+                              className="viz-toggle"
+                              onClick={() => setConfirmDelete(null)}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {rowError ? <p className="error">{rowError}</p> : null}
+                      {rowNotice ? <p className="success">{rowNotice}</p> : null}
 
                       <div className="signature-preview">
                         <p>
