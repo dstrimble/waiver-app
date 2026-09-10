@@ -44,8 +44,35 @@ ALTER TABLE waiver_submissions
 ALTER TABLE waiver_submissions
   ADD COLUMN IF NOT EXISTS notification_error   TEXT;
 
+-- Delivery status for the follow-up email sent a week after signing. A NULL
+-- followup_sent_at is the queue: the sweep claims a row by stamping it and
+-- clears the stamp again if the send fails, so a row is never emailed twice.
+ALTER TABLE waiver_submissions
+  ADD COLUMN IF NOT EXISTS followup_sent_at TIMESTAMPTZ;
+ALTER TABLE waiver_submissions
+  ADD COLUMN IF NOT EXISTS followup_error   TEXT;
+
+-- Only waivers signed from the moment this feature shipped get a follow-up;
+-- nobody already in the table is mailed retroactively.
+--
+-- The two statements below do that without any migration bookkeeping. The
+-- column is created defaulting to false, which back-fills every existing row
+-- as ineligible in the same breath; the default is then flipped to true so
+-- every waiver signed afterwards is eligible. Both are no-ops on later boots,
+-- and they share one implicit transaction, so no submission can slip through
+-- in between.
+ALTER TABLE waiver_submissions
+  ADD COLUMN IF NOT EXISTS followup_eligible BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE waiver_submissions
+  ALTER COLUMN followup_eligible SET DEFAULT true;
+
 CREATE INDEX IF NOT EXISTS idx_waiver_submitted_at
   ON waiver_submissions (submitted_at DESC);
+
+-- Keeps the follow-up sweep off a full table scan as the table grows.
+CREATE INDEX IF NOT EXISTS idx_waiver_followup_pending
+  ON waiver_submissions (submitted_at)
+  WHERE followup_sent_at IS NULL AND followup_eligible;
 
 CREATE TABLE IF NOT EXISTS admin_auth (
   id            SMALLINT PRIMARY KEY CHECK (id = 1),

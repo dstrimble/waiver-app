@@ -59,6 +59,12 @@ spec:
               value: "gravitasmma@gmail.com"
             - name: GYM_NAME
               value: "Gravitas Mixed Martial Arts"
+            - name: GYM_SHORT_NAME
+              value: "Gravitas"
+            - name: FOLLOWUP_ENABLED
+              value: "true"
+            - name: FOLLOWUP_DELAY_DAYS
+              value: "7"
             - name: DISPLAY_TIMEZONE
               value: "America/New_York"
 ---

@@ -19,6 +19,7 @@ A standalone waiver submission app with e-signature support.
 - Submission persisted to PostgreSQL
 - Signed waiver emailed as a PDF to the gym and to the person who signed
 - Follow-up instructions for signing up and managing an account
+- Automatic "how was your trial week?" email a week after signing
 - Admin listing endpoint secured by passcode header
 
 ## Run Locally With Docker
@@ -100,6 +101,7 @@ to ask a coach at the front desk.
 | `WAIVER_NOTIFY_EMAIL` | Where the gym copy is sent (default `gravitasmma@gmail.com`) |
 | `MAIL_REPLY_TO` | Reply-To on the guest's email (defaults to the notify address) |
 | `GYM_NAME` | Name used in the PDF and emails |
+| `GYM_SHORT_NAME` | Short name for the follow-up email copy (defaults to `GYM_NAME`) |
 | `GYM_PHONE` | Shown under "Questions?" |
 | `GYM_ADDRESS` | Shown under "Questions?" |
 | `GYM_WEBSITE_URL` | Shown under "Questions?" |
@@ -117,6 +119,43 @@ kubectl -n gravitas patch secret app-secrets \
   -p '{"stringData":{"SMTP_PASSWORD":"<app password>"}}'
 kubectl -n gravitas rollout restart deploy/backend
 ```
+
+## One-Week Follow-Up Email
+
+A week after someone signs, the backend emails them again - asking how the free
+trial week went and inviting them to become a member. It carries the same
+sign-up, account, and schedule links as the confirmation email, so nothing they
+were given up front goes missing. No PDF is attached; the confirmation already
+delivered that.
+
+A sweep runs every `FOLLOWUP_POLL_MINUTES` and picks up every waiver that has
+come due since the last one. Each waiver is claimed in the database before its
+email is sent, so a guest is never emailed twice - not by two backend replicas,
+and not by two overlapping sweeps. A failed send releases the claim and is
+retried on the next sweep, with the reason stored in `followup_error` on the
+row. The admin page shows the follow-up status alongside the waiver's.
+
+**Only waivers signed after this feature is deployed are ever followed up.**
+Everyone already in the table is marked ineligible the moment the column is
+created, so turning this on never mails your back catalogue. The admin page
+shows those as "Not scheduled - signed before follow-ups".
+
+Separately, a waiver stops being eligible `FOLLOWUP_GRACE_DAYS` after it comes
+due. That stops a batch of stale nudges going out once the service has been
+down for a while - a month-late "how was your trial week?" helps nobody.
+
+| Variable | Purpose |
+| --- | --- |
+| `FOLLOWUP_ENABLED` | `true` (default). Set `false` to turn the follow-up off |
+| `FOLLOWUP_DELAY_DAYS` | How long after signing to send (default `7`) |
+| `FOLLOWUP_GRACE_DAYS` | How long a due waiver stays eligible (default `3`) |
+| `FOLLOWUP_POLL_MINUTES` | How often the sweep runs (default `60`) |
+| `FOLLOWUP_BATCH_SIZE` | Most waivers handled per sweep (default `50`) |
+| `GYM_SHORT_NAME` | Conversational name in the copy (defaults to `GYM_NAME`) |
+
+Sending reuses the same SMTP settings and links as the confirmation email; with
+SMTP unset the sweep logs a warning and does nothing. Docker Compose ships with
+`FOLLOWUP_ENABLED=false` so a local database of old waivers cannot mail anyone.
 
 ## Waiver Text
 

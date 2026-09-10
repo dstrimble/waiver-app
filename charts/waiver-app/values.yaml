@@ -26,12 +26,22 @@ email:
   MAIL_REPLY_TO: ""
   # Gym details and account links shown to the person who signed.
   GYM_NAME: "Gravitas Mixed Martial Arts"
+  # Short, conversational form used in the follow-up email ("your free trial
+  # week at Gravitas"). Falls back to GYM_NAME when empty.
+  GYM_SHORT_NAME: ""
   GYM_PHONE: ""
   GYM_ADDRESS: ""
   GYM_WEBSITE_URL: ""
   SIGNUP_URL: ""
   ACCOUNT_PORTAL_URL: ""
   SCHEDULE_URL: ""
+  # One-week follow-up email inviting trial guests to become members.
+  FOLLOWUP_ENABLED: "true"
+  FOLLOWUP_DELAY_DAYS: "7"
+  # How long after coming due a waiver stays eligible. Past this it is passed
+  # over, so a restart after downtime never sends a batch of stale nudges.
+  FOLLOWUP_GRACE_DAYS: "3"
+  FOLLOWUP_POLL_MINUTES: "60"
   # Timezone used for timestamps printed on the PDF.
   DISPLAY_TIMEZONE: "America/New_York"
 

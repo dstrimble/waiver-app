@@ -19,7 +19,8 @@ vi.mock("../src/mailer.js", () => ({
 
 import { createApp } from "../src/app.js";
 import { renderWaiverPdf, waiverPdfFilename } from "../src/waiverPdf.js";
-import { buildGymEmail, buildMemberEmail } from "../src/waiverEmails.js";
+import { buildFollowUpEmail, buildGymEmail, buildMemberEmail } from "../src/waiverEmails.js";
+import { getFollowUpConfig, sendDueFollowUps } from "../src/followUpEmails.js";
 import { WAIVER_PARAGRAPHS, WAIVER_TEXT_VERSION } from "../src/waiverText.js";
 
 // 1x1 transparent PNG - a valid stand-in for a drawn signature.
@@ -287,6 +288,145 @@ describe("waiver api", () => {
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
     expect(queryMock).toHaveBeenCalled();
+  });
+});
+
+describe("one-week follow-up email", () => {
+  const CONFIG = {
+    gymName: "Gravitas Mixed Martial Arts",
+    gymShortName: "Gravitas",
+    notifyEmail: "gravitasmma@gmail.com",
+    signupUrl: "https://example.com/join",
+    accountPortalUrl: "https://example.com/account",
+    scheduleUrl: "https://example.com/schedule",
+    phone: "501-497-5811",
+    websiteUrl: "https://www.gravitasmartialarts.com/",
+  };
+
+  const KEYS = [
+    "FOLLOWUP_ENABLED",
+    "FOLLOWUP_DELAY_DAYS",
+    "FOLLOWUP_GRACE_DAYS",
+    "FOLLOWUP_POLL_MINUTES",
+    "FOLLOWUP_BATCH_SIZE",
+  ];
+
+  beforeEach(() => {
+    for (const key of KEYS) delete process.env[key];
+    queryMock.mockReset();
+    sendMailMock.mockReset();
+    sendMailMock.mockResolvedValue({ messageId: "<abc@local>", accepted: [], rejected: [] });
+  });
+
+  afterEach(() => {
+    for (const key of KEYS) delete process.env[key];
+  });
+
+  it("asks about the trial week and repeats the confirmation email's links", () => {
+    const email = buildFollowUpEmail(SUBMISSION, CONFIG);
+
+    expect(email.subject).toBe("How was your free trial week at Gravitas?");
+    expect(email.text).toContain("How did you enjoy your free trial week at Gravitas?");
+    expect(email.text).toContain("Sign up is easy!");
+    expect(email.text).toContain("fitness journey");
+    expect(email.text).toContain("Hi Jane,");
+
+    // Every link the confirmation email offers is offered again here.
+    const confirmation = buildMemberEmail(SUBMISSION, CONFIG);
+    for (const url of [CONFIG.signupUrl, CONFIG.accountPortalUrl, CONFIG.scheduleUrl]) {
+      expect(confirmation.text).toContain(url);
+      expect(email.text).toContain(url);
+      expect(email.html).toContain(`href="${url}"`);
+    }
+    expect(email.text).toContain("Phone: 501-497-5811");
+  });
+
+  it("falls back to the full gym name and website when the extras are unset", () => {
+    const email = buildFollowUpEmail(SUBMISSION, {
+      gymName: "Gravitas Mixed Martial Arts",
+      websiteUrl: "https://www.gravitasmartialarts.com/",
+    });
+
+    expect(email.subject).toContain("Gravitas Mixed Martial Arts");
+    expect(email.text).toMatch(/visit https:\/\/www\.gravitasmartialarts\.com\//);
+  });
+
+  it("escapes guest-supplied names", () => {
+    const email = buildFollowUpEmail({ ...SUBMISSION, name: '<script>x</script>' }, CONFIG);
+
+    expect(email.html).not.toContain("<script>");
+  });
+
+  it("claims waivers due a week ago and emails each one", async () => {
+    queryMock.mockImplementation((sql) => {
+      if (sql.includes("RETURNING w.id")) {
+        return Promise.resolve({
+          rows: [
+            { id: 21, name: "Jane Doe", email: "jane@example.com" },
+            { id: 22, name: "Sam Roe", email: "sam@example.com" },
+          ],
+        });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+
+    const result = await sendDueFollowUps();
+
+    expect(result).toEqual({ sent: 2, failed: 0 });
+    expect(sendMailMock.mock.calls.map(([m]) => m.to)).toEqual([
+      "jane@example.com",
+      "sam@example.com",
+    ]);
+    // A nudge, not a records copy - the PDF only ships with the confirmation.
+    for (const [message] of sendMailMock.mock.calls) {
+      expect(message.attachments).toBeUndefined();
+    }
+
+    // Claim window: due at 7 days, given up on after the 3-day grace period.
+    const [claimSql, claimParams] = queryMock.mock.calls[0];
+    expect(claimParams).toEqual([7, 10, 50]);
+    // Waivers signed before the feature shipped are never picked up.
+    expect(claimSql).toMatch(/AND followup_eligible/);
+  });
+
+  it("releases the claim so a failed send is retried next sweep", async () => {
+    queryMock.mockImplementation((sql) => {
+      if (sql.includes("RETURNING w.id")) {
+        return Promise.resolve({ rows: [{ id: 23, name: "Jane Doe", email: "jane@example.com" }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    sendMailMock.mockRejectedValue(new Error("smtp is down"));
+
+    const result = await sendDueFollowUps();
+
+    expect(result).toEqual({ sent: 0, failed: 1 });
+    const release = queryMock.mock.calls.find(([sql]) =>
+      sql.includes("followup_sent_at = NULL")
+    );
+    expect(release).toBeDefined();
+    expect(release[1]).toEqual([23, "smtp is down"]);
+  });
+
+  it("sends nothing when disabled", async () => {
+    process.env.FOLLOWUP_ENABLED = "false";
+
+    const result = await sendDueFollowUps();
+
+    expect(result.skipped).toBe(true);
+    expect(queryMock).not.toHaveBeenCalled();
+    expect(sendMailMock).not.toHaveBeenCalled();
+  });
+
+  it("honors a custom delay and grace window", () => {
+    process.env.FOLLOWUP_DELAY_DAYS = "14";
+    process.env.FOLLOWUP_GRACE_DAYS = "1";
+
+    expect(getFollowUpConfig()).toMatchObject({
+      enabled: true,
+      delayDays: 14,
+      graceDays: 1,
+    });
   });
 });
 

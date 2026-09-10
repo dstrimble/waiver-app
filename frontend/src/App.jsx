@@ -333,6 +333,16 @@ function AdminPage() {
                             ? `Not sent - ${selectedWaiver.notification_error}`
                             : "Pending"}
                       </p>
+                      <p>
+                        <strong>Follow-up Email:</strong>{" "}
+                        {selectedWaiver.followup_sent_at
+                          ? `Sent ${toDisplayDate(selectedWaiver.followup_sent_at)}`
+                          : selectedWaiver.followup_eligible === false
+                            ? "Not scheduled - signed before follow-ups"
+                            : selectedWaiver.followup_error
+                              ? `Not sent - ${selectedWaiver.followup_error}`
+                              : "Not sent yet"}
+                      </p>
 
                       <div className="signature-preview">
                         <p>

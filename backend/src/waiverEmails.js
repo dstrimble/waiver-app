@@ -68,41 +68,42 @@ function contactLines(config) {
   return lines;
 }
 
-/** Confirmation for the person who signed, with their waiver PDF attached. */
-export function buildMemberEmail(submission, config) {
+// The links block is shared by the confirmation and the one-week follow-up so
+// the two emails can never offer a different set of links; only the heading
+// above them changes.
+function stepsText(config, heading) {
   const steps = nextSteps(config);
-  const contacts = contactLines(config);
-
-  const textParts = [
-    `Hi ${firstName(submission.name)},`,
-    "",
-    `Thanks for signing the waiver at ${config.gymName}. A PDF copy is attached for your records.`,
-    "",
-  ];
-
-  if (steps.length) {
-    textParts.push("Getting started");
-    for (const step of steps) {
-      textParts.push(`- ${step.label}: ${step.detail}`);
-      if (step.note) textParts.push(`  ${step.note}`);
-    }
-    textParts.push("");
-  } else {
-    textParts.push(
+  if (!steps.length) {
+    return [
       `To sign up for a membership or manage your account, visit ${
         config.websiteUrl || "our website"
       }.`,
-      ""
-    );
+      "",
+    ];
   }
 
-  if (contacts.length) {
-    textParts.push("Questions?", ...contacts, "");
+  const lines = [heading];
+  for (const step of steps) {
+    lines.push(`- ${step.label}: ${step.detail}`);
+    if (step.note) lines.push(`  ${step.note}`);
   }
-  textParts.push(`See you on the mats,`, config.gymName);
+  lines.push("");
+  return lines;
+}
 
-  const stepsHtml = steps.length
-    ? `<h2 style="margin:28px 0 12px;font-size:16px;">Getting started</h2>
+function stepsHtml(config, heading) {
+  const steps = nextSteps(config);
+  if (!steps.length) {
+    return `<p style="margin:28px 0 0;">To sign up for a membership or manage your account, visit ${
+      config.websiteUrl
+        ? `<a href="${escapeHtml(config.websiteUrl)}" style="color:#b3261e;font-weight:600;">${escapeHtml(
+            config.websiteUrl
+          )}</a>`
+        : "our website"
+    }.</p>`;
+  }
+
+  return `<h2 style="margin:28px 0 12px;font-size:16px;">${escapeHtml(heading)}</h2>
        <ul style="margin:0;padding-left:20px;">
          ${steps
            .map(
@@ -117,19 +118,39 @@ export function buildMemberEmail(submission, config) {
              </li>`
            )
            .join("")}
-       </ul>`
-    : `<p style="margin:28px 0 0;">To sign up for a membership or manage your account, visit ${
-        config.websiteUrl
-          ? `<a href="${escapeHtml(config.websiteUrl)}" style="color:#b3261e;font-weight:600;">${escapeHtml(
-              config.websiteUrl
-            )}</a>`
-          : "our website"
-      }.</p>`;
+       </ul>`;
+}
 
-  const contactsHtml = contacts.length
-    ? `<h2 style="margin:28px 0 12px;font-size:16px;">Questions?</h2>
-       <p style="margin:0;color:#555;font-size:14px;">${contacts.map(escapeHtml).join("<br>")}</p>`
-    : "";
+function contactsText(config) {
+  const contacts = contactLines(config);
+  return contacts.length ? ["Questions?", ...contacts, ""] : [];
+}
+
+function contactsHtml(config) {
+  const contacts = contactLines(config);
+  if (!contacts.length) return "";
+  return `<h2 style="margin:28px 0 12px;font-size:16px;">Questions?</h2>
+       <p style="margin:0;color:#555;font-size:14px;">${contacts.map(escapeHtml).join("<br>")}</p>`;
+}
+
+function signOffHtml(config) {
+  return `<p style="margin:28px 0 0;color:#555;font-size:14px;">See you on the mats,<br>${escapeHtml(
+    config.gymName
+  )}</p>`;
+}
+
+/** Confirmation for the person who signed, with their waiver PDF attached. */
+export function buildMemberEmail(submission, config) {
+  const textParts = [
+    `Hi ${firstName(submission.name)},`,
+    "",
+    `Thanks for signing the waiver at ${config.gymName}. A PDF copy is attached for your records.`,
+    "",
+    ...stepsText(config, "Getting started"),
+    ...contactsText(config),
+    `See you on the mats,`,
+    config.gymName,
+  ];
 
   const html = htmlShell(
     config.gymName,
@@ -138,15 +159,54 @@ export function buildMemberEmail(submission, config) {
      <p style="margin:0;">Thanks for signing the waiver at ${escapeHtml(
        config.gymName
      )}. A PDF copy is attached for your records.</p>
-     ${stepsHtml}
-     ${contactsHtml}
-     <p style="margin:28px 0 0;color:#555;font-size:14px;">See you on the mats,<br>${escapeHtml(
-       config.gymName
-     )}</p>`
+     ${stepsHtml(config, "Getting started")}
+     ${contactsHtml(config)}
+     ${signOffHtml(config)}`
   );
 
   return {
     subject: `Your signed waiver - ${config.gymName}`,
+    text: textParts.join("\n"),
+    html,
+  };
+}
+
+/**
+ * Sent a week after signing, once the trial week is behind them: asks how the
+ * week went and invites them to join, carrying the same links as the
+ * confirmation email so nothing they were given up front goes missing.
+ */
+export function buildFollowUpEmail(submission, config) {
+  const shortName = config.gymShortName || config.gymName;
+
+  const pitch =
+    `How did you enjoy your free trial week at ${shortName}? We would love to hear about ` +
+    `your experience and have you onboard as a member. Sign up is easy! Let us be a part ` +
+    `of your fitness journey today.`;
+
+  const textParts = [
+    `Hi ${firstName(submission.name)},`,
+    "",
+    pitch,
+    "",
+    ...stepsText(config, "Ready to join?"),
+    ...contactsText(config),
+    `See you on the mats,`,
+    config.gymName,
+  ];
+
+  const html = htmlShell(
+    config.gymName,
+    `<h1 style="margin:0 0 16px;font-size:22px;">How was your free trial week?</h1>
+     <p style="margin:0 0 12px;">Hi ${escapeHtml(firstName(submission.name))},</p>
+     <p style="margin:0;">${escapeHtml(pitch)}</p>
+     ${stepsHtml(config, "Ready to join?")}
+     ${contactsHtml(config)}
+     ${signOffHtml(config)}`
+  );
+
+  return {
+    subject: `How was your free trial week at ${shortName}?`,
     text: textParts.join("\n"),
     html,
   };
