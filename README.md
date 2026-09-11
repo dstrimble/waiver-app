@@ -57,8 +57,9 @@ npm run dev
 - `POST /api/admin/waivers/:id/followup` - send the trial follow-up now
 - `POST /api/admin/waivers/:id/archive` - hide a waiver, keeping the record
 - `POST /api/admin/waivers/:id/restore` - bring an archived waiver back
-- `GET /api/admin/squarespace` - members and sales from Squarespace
-  (`?refresh=true` skips the half-hour cache)
+- `GET /api/admin/members` - members and sales from Squarespace
+- `GET /api/admin/conversion` - how many waiver signers became members (both
+  Squarespace routes take `?refresh=true` to skip the half-hour cache)
 
 - `GET /api/admin/auth/config` - which Google client the sign-in button uses
 - `POST /api/admin/auth/google` - trade a Google ID token for a session, or
@@ -73,13 +74,23 @@ route needs either the `x-admin-passcode` header or a Google session token as
 
 ## Admin Sign-In
 
-The admin page lives at `/admin` (the old `/waiver/admin` redirects there). It
-offers **Sign in with Google** above the passcode.
+The admin area has three pages behind one sign-in:
+
+- **`/admin`** - home: approve or remove admin accounts, change the passcode,
+  and links to the other two pages.
+- **`/admin/waiver`** (also `/waiver/admin`) - waiver charts, how many signers
+  became members, and the waiver list.
+- **`/admin/members`** - members and sales from Squarespace.
+
+Moving between them happens in the page, so a passcode sign-in carries over;
+reloading asks for the passcode again. Sign-in offers **Sign in with Google**
+above the passcode.
 
 Anyone can sign in with Google, but a new account only files a request: it sees
 nothing until an existing admin approves it, and the gym inbox
 (`WAIVER_NOTIFY_EMAIL`) is emailed when a request comes in. Admins approve,
-deny, and remove people under **Admin access** at the top of the page. Removing
+deny, and remove people on the admin home page; the Home tab shows how many are
+waiting. Removing
 someone ends their sessions immediately; they can ask again, and it takes a
 fresh approval. Nobody can remove themselves, so there is always someone left.
 
@@ -211,7 +222,7 @@ SMTP unset the sweep logs a warning and does nothing. Docker Compose ships with
 
 ## Admin Dashboard
 
-Unlocking the admin page loads a set of charts above the waiver list:
+The waiver page (`/admin/waiver`) shows a set of charts above the waiver list:
 
 - **Headline tiles** - waivers all time, last 30 days, last 7 days, and how many
   follow-ups have gone out (with the number still awaiting their week).
@@ -227,6 +238,14 @@ Unlocking the admin page loads a set of charts above the waiver list:
   grey so they do not compete with real referral sources.
 - **Age when signing** and **which day people sign** - useful for programming
   kids' classes and for staffing the front desk.
+
+- **Waivers to members** - with Squarespace connected, how many waiver signers
+  went on to pay, how long it typically took, by the month they signed, and
+  split by whether they were sent the one-week follow-up. Waivers are matched
+  to membership charges by email; a charge up to a day before signing still
+  counts (people pay on the spot), Add Child counts, and anyone who had paid
+  before signing is left out as an existing or past member. Only these counts
+  reach the waiver page - never the member list.
 
 Every chart has a "Show data" toggle that swaps it for the underlying table, so
 nothing is locked behind colour or hover.
@@ -267,8 +286,8 @@ can do by accident.
 
 ## Members and Sales (Squarespace)
 
-With `SQUARESPACE_API_KEY` set, the admin page adds a members and sales section
-below the waiver charts, read from the Squarespace Orders API:
+With `SQUARESPACE_API_KEY` set, the membership page (`/admin/members`) shows
+members and sales read from the Squarespace Orders API:
 
 - **Tiles** - current members, children added, joined and left this month, and
   members all time; then sales this month and over the last 12 months, split by

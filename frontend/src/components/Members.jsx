@@ -92,89 +92,6 @@ function MembersPanel({ members }) {
   );
 }
 
-const percent = (rate) => `${Math.round(rate * 100)}%`;
-
-function ConversionTable({ rows }) {
-  return (
-    <table className="viz-table">
-      <thead>
-        <tr>
-          {["", "Signed", "Joined", "Rate"].map((c) => (
-            <th key={c} scope="col">{c}</th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row) => (
-          <tr key={row.label}>
-            <td>{row.label}</td>
-            <td>{row.signers}</td>
-            <td>{row.joined}</td>
-            <td>{row.signers ? percent(row.rate) : "-"}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
-function ConversionPanel({ conversion }) {
-  return (
-    <>
-      <StatTiles
-        tiles={[
-          {
-            label: "Signed a waiver",
-            value: conversion.signers,
-            note: `${conversion.alreadyPaying} who had already paid are left out`,
-          },
-          { label: "Became members", value: conversion.joined },
-          { label: "Conversion", display: percent(conversion.rate) },
-          {
-            label: "Typical time to join",
-            display: conversion.medianDaysToJoin === null ? "-" : `${conversion.medianDaysToJoin} days`,
-            note: "Median, from signing to first payment",
-          },
-        ]}
-      />
-
-      <div className="viz-two-up">
-        <section className="viz-card">
-          <header className="viz-head">
-            <div>
-              <h3>By month signed</h3>
-              <p className="viz-sub">Recent months are still young - some will join yet.</p>
-            </div>
-          </header>
-          <div className="viz-table-wrap">
-            <ConversionTable
-              rows={[...conversion.byMonth].reverse().map((m) => ({ ...m, label: monthLabel(m.month) }))}
-            />
-          </div>
-        </section>
-
-        <section className="viz-card">
-          <header className="viz-head">
-            <div>
-              <h3>Did the follow-up email help?</h3>
-              <p className="viz-sub">
-                Only waivers signed since the follow-up launched can have had one, so the groups
-                cover different periods.
-              </p>
-            </div>
-          </header>
-          <ConversionTable
-            rows={[
-              { label: "Sent the follow-up", ...conversion.followUp.sent },
-              { label: "Not sent", ...conversion.followUp.notSent },
-            ]}
-          />
-        </section>
-      </div>
-    </>
-  );
-}
-
 function SalesPanel({ sales }) {
   const [range, setRange] = useState(12);
   const months = range ? sales.months.slice(-range) : sales.months;
@@ -230,7 +147,7 @@ function SalesPanel({ sales }) {
  * charges - Squarespace has no "is a member" flag - so the copy says so rather
  * than presenting the numbers as exact.
  */
-export default function SquarespaceSection({ data, loading, error, onRefresh }) {
+export default function MembersSection({ data, loading, error, onRefresh }) {
   let body = null;
   if (!data) {
     if (loading) body = <p className="empty-state">Loading members and sales from Squarespace...</p>;
@@ -245,8 +162,6 @@ export default function SquarespaceSection({ data, loading, error, onRefresh }) 
     body = (
       <>
         <MembersPanel members={data.members} />
-        <h2 className="squarespace-subhead">Waivers to members</h2>
-        <ConversionPanel conversion={data.conversion} />
         <h2 className="squarespace-subhead">Sales</h2>
         <SalesPanel sales={data.sales} />
       </>
@@ -254,7 +169,7 @@ export default function SquarespaceSection({ data, loading, error, onRefresh }) 
   }
 
   return (
-    <section className="viz-dashboard squarespace-section" aria-label="Members and sales">
+    <section className="viz-dashboard" aria-label="Members and sales">
       <div className="squarespace-head">
         <h2>Members</h2>
         {data?.fetchedAt ? (

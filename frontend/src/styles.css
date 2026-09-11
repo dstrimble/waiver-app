@@ -941,6 +941,83 @@ input[type="checkbox"] {
   max-height: 480px;
 }
 
+/* Admin section tabs, and the home page's links to each section. */
+.admin-live-head {
+  flex-wrap: wrap;
+}
+
+.admin-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.admin-nav-link {
+  padding: 0.4rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  text-decoration: none;
+}
+
+.admin-nav-link:hover {
+  color: var(--ink);
+  border-color: var(--muted);
+}
+
+.admin-nav-link.is-active {
+  color: var(--ink);
+  border-color: #d64a59;
+  box-shadow: 0 0 0 2px rgba(214, 74, 89, 0.22);
+}
+
+.admin-live-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.admin-links {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  margin-top: 1rem;
+}
+
+.admin-link-card {
+  display: grid;
+  gap: 0.3rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper-soft);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.admin-link-card:hover {
+  border-color: #d64a59;
+}
+
+.admin-link-card strong {
+  font-family: "Oswald", Impact, sans-serif;
+  font-size: 1.2rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.admin-link-card span {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.admin-home-passcode,
+.admin-missing {
+  margin-top: 1rem;
+}
+
 /* Sign-in: Google first, with the passcode underneath as the fallback. */
 .admin-signin {
   display: grid;

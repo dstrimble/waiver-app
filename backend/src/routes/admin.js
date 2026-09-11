@@ -3,7 +3,7 @@ import { pool } from "../db.js";
 import { hashPasscode, verifyPasscode } from "../adminPasscode.js";
 import { sendFollowUpNow } from "../followUpEmails.js";
 import { getWaiverStats } from "../waiverStats.js";
-import { getSquarespaceStats } from "../squarespaceStats.js";
+import { getConversion, getMembersAndSales } from "../squarespaceStats.js";
 import {
   approveAdminUser,
   createSession,
@@ -319,18 +319,24 @@ adminRouter.get("/stats", requireAdmin, async (_req, res) => {
   }
 });
 
-/**
- * Members and sales, worked out from Squarespace orders. Cached for half an
- * hour; ?refresh=true pulls a fresh copy.
- */
-adminRouter.get("/squarespace", requireAdmin, async (req, res) => {
-  try {
-    return res.json(await getSquarespaceStats({ refresh: req.query.refresh === "true" }));
-  } catch (err) {
-    console.error("Failed to load Squarespace data:", err);
-    return res.status(502).json({ error: "Could not load data from Squarespace." });
-  }
-});
+// Members, sales and conversion are worked out from Squarespace orders, cached
+// for half an hour; ?refresh=true pulls a fresh copy.
+function squarespaceRoute(load) {
+  return async (req, res) => {
+    try {
+      return res.json(await load({ refresh: req.query.refresh === "true" }));
+    } catch (err) {
+      console.error("Failed to load Squarespace data:", err);
+      return res.status(502).json({ error: "Could not load data from Squarespace." });
+    }
+  };
+}
+
+/** Members and sales, for the membership page. */
+adminRouter.get("/members", requireAdmin, squarespaceRoute(getMembersAndSales));
+
+/** Waiver signers who became members, for the waiver page. */
+adminRouter.get("/conversion", requireAdmin, squarespaceRoute(getConversion));
 
 /** Google accounts that have asked for access, pending first. */
 adminRouter.get("/users", requireAdmin, async (_req, res) => {

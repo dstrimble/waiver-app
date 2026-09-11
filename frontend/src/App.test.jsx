@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App.jsx";
 
@@ -25,17 +25,34 @@ afterEach(() => {
   window.history.pushState({}, "", "/");
 });
 
-describe("admin route", () => {
-  it("serves the admin page at /admin", () => {
+describe("admin routes", () => {
+  it("serves the admin home at /admin", () => {
     window.history.pushState({}, "", "/admin");
     render(<App />);
 
-    expect(screen.getByRole("heading", { level: 1, name: /waiver admin/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Admin" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /unlock admin/i })).toBeInTheDocument();
   });
 
-  it("no longer serves it at /waiver/admin (nginx redirects that to /admin)", () => {
-    window.history.pushState({}, "", "/waiver/admin");
+  it("serves the waiver page at /admin/waiver and at /waiver/admin", () => {
+    for (const path of ["/admin/waiver", "/waiver/admin"]) {
+      window.history.pushState({}, "", path);
+      const { unmount } = render(<App />);
+
+      expect(screen.getByRole("heading", { level: 1, name: "Waivers" })).toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  it("serves the membership page at /admin/members", () => {
+    window.history.pushState({}, "", "/admin/members");
+    render(<App />);
+
+    expect(screen.getByRole("heading", { level: 1, name: "Members & Sales" })).toBeInTheDocument();
+  });
+
+  it("says so for an admin page that does not exist", () => {
+    window.history.pushState({}, "", "/admin/nope");
     render(<App />);
 
     expect(screen.getByRole("heading", { level: 1, name: /page not found/i })).toBeInTheDocument();
@@ -88,22 +105,62 @@ describe("admin sign-in", () => {
     expect(screen.getByRole("button", { name: /unlock admin/i })).toBeInTheDocument();
   });
 
+  const SIGNED_IN = {
+    "/api/admin/auth/config": { googleClientId: "client-123" },
+    "/api/admin/auth/me": { user: { id: "1", email: "owner@example.com", name: "Owner" } },
+    "/api/admin/users": [{ id: "4", email: "coach@example.com", name: "Coach", status: "pending" }],
+    "/api/admin/waivers": [],
+    "/api/admin/stats": { error: "not in this test" },
+    "/api/admin/conversion": { configured: false },
+    "/api/admin/members": { configured: false },
+  };
+  const calledPaths = (fetchMock) => fetchMock.mock.calls.map(([url]) => String(url).split("?")[0]);
+
   it("picks a stored Google session back up after a reload", async () => {
     window.localStorage.setItem("waiver-admin-session", "stored-token");
-    const fetchMock = routeFetch({
-      "/api/admin/auth/config": { googleClientId: "client-123" },
-      "/api/admin/auth/me": { user: { id: "1", email: "owner@example.com", name: "Owner" } },
-      "/api/admin/waivers": [],
-      "/api/admin/users": [],
-      "/api/admin/stats": { error: "not in this test" },
-      "/api/admin/squarespace": { configured: false },
-    });
+    const fetchMock = routeFetch(SIGNED_IN);
     window.history.pushState({}, "", "/admin");
     render(<App />);
 
     expect(await screen.findByText("Signed in as owner@example.com")).toBeInTheDocument();
     const me = fetchMock.mock.calls.find(([url]) => url === "/api/admin/auth/me");
     expect(me[1].headers).toEqual({ Authorization: "Bearer stored-token" });
+  });
+
+  it("makes the admin home about accounts and links, not data", async () => {
+    window.localStorage.setItem("waiver-admin-session", "stored-token");
+    const fetchMock = routeFetch(SIGNED_IN);
+    window.history.pushState({}, "", "/admin");
+    render(<App />);
+
+    expect(await screen.findByText("Coach")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /home \(1 waiting\)/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
+    const paths = calledPaths(fetchMock);
+    expect(paths).not.toContain("/api/admin/waivers");
+    expect(paths).not.toContain("/api/admin/members");
+  });
+
+  it("moves between sections without signing in again", async () => {
+    window.localStorage.setItem("waiver-admin-session", "stored-token");
+    const fetchMock = routeFetch(SIGNED_IN);
+    window.history.pushState({}, "", "/admin");
+    render(<App />);
+    await screen.findByText("Signed in as owner@example.com");
+
+    fireEvent.click(screen.getAllByRole("link", { name: "Waivers" })[0]);
+
+    expect(window.location.pathname).toBe("/admin/waiver");
+    expect(screen.getByRole("heading", { level: 1, name: "Waivers" })).toBeInTheDocument();
+    // Waiver data and conversion load here; the member list does not.
+    await waitFor(() => expect(calledPaths(fetchMock)).toContain("/api/admin/conversion"));
+    expect(calledPaths(fetchMock)).toContain("/api/admin/waivers");
+    expect(calledPaths(fetchMock)).not.toContain("/api/admin/members");
+
+    fireEvent.click(screen.getByRole("link", { name: "Members & sales" }));
+
+    expect(window.location.pathname).toBe("/admin/members");
+    await waitFor(() => expect(calledPaths(fetchMock)).toContain("/api/admin/members"));
   });
 
   it("forgets a stored session the backend no longer accepts", async () => {

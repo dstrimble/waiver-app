@@ -872,7 +872,7 @@ describe("waivers to members", () => {
   });
 });
 
-describe("GET /api/admin/squarespace", () => {
+describe("GET /api/admin/members", () => {
   const auth = (req) => req.set("x-admin-passcode", "changeme");
   const recent = new Date(Date.now() - 5 * 86400000).toISOString();
 
@@ -924,7 +924,7 @@ describe("GET /api/admin/squarespace", () => {
   });
 
   it("requires the admin passcode", async () => {
-    const res = await request(createApp()).get("/api/admin/squarespace");
+    const res = await request(createApp()).get("/api/admin/members");
 
     expect(res.status).toBe(401);
   });
@@ -934,7 +934,7 @@ describe("GET /api/admin/squarespace", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    const res = await auth(request(createApp()).get("/api/admin/squarespace"));
+    const res = await auth(request(createApp()).get("/api/admin/members"));
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ configured: false });
@@ -949,7 +949,7 @@ describe("GET /api/admin/squarespace", () => {
     vi.stubGlobal("fetch", fetchMock);
     const app = createApp();
 
-    const res = await auth(request(app).get("/api/admin/squarespace"));
+    const res = await auth(request(app).get("/api/admin/members"));
 
     expect(res.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -964,26 +964,45 @@ describe("GET /api/admin/squarespace", () => {
     // Test-mode orders and billing addresses never reach the page.
     expect(res.body.sales.totals.allTime.total).toBe(115);
     expect(JSON.stringify(res.body)).not.toContain("1 Main St");
+    // Membership data stays apart from the waivers: none are read here.
+    expect(res.body.conversion).toBeUndefined();
+    expect(queryMock).not.toHaveBeenCalled();
+
+    // Served from cache until a refresh is asked for.
+    await auth(request(app).get("/api/admin/members"));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    fetchMock.mockResolvedValueOnce(page([rawOrder("a")]));
+    await auth(request(app).get("/api/admin/members?refresh=true"));
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("serves waiver-to-member conversion on its own, without the member list", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(page([rawOrder("a")])));
+
+    const res = await auth(request(createApp()).get("/api/admin/conversion"));
+
+    expect(res.status).toBe(200);
     // Pat signed a waiver six days ago and paid five days ago.
     expect(res.body.conversion).toMatchObject({ signers: 1, joined: 1, medianDaysToJoin: 1 });
+    expect(res.body.members).toBeUndefined();
+    expect(JSON.stringify(res.body)).not.toContain("pat@example.com");
     // Only email, sign date and follow-up status are read from the waivers.
     const [waiverSql] = queryMock.mock.calls[0];
     expect(waiverSql).toMatch(/FROM waiver_submissions/);
     expect(waiverSql).not.toMatch(/signature_data_url/);
+  });
 
-    // Served from cache until a refresh is asked for.
-    await auth(request(app).get("/api/admin/squarespace"));
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+  it("requires the admin passcode for conversion too", async () => {
+    const res = await request(createApp()).get("/api/admin/conversion");
 
-    fetchMock.mockResolvedValueOnce(page([rawOrder("a")]));
-    await auth(request(app).get("/api/admin/squarespace?refresh=true"));
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(res.status).toBe(401);
   });
 
   it("502s when Squarespace refuses the request", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401 }));
 
-    const res = await auth(request(createApp()).get("/api/admin/squarespace"));
+    const res = await auth(request(createApp()).get("/api/admin/members"));
 
     expect(res.status).toBe(502);
     expect(res.body.error).toMatch(/Squarespace/);
