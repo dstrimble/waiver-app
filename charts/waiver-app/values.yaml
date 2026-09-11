@@ -39,6 +39,9 @@ email:
   SIGNUP_URL: ""
   ACCOUNT_PORTAL_URL: ""
   SCHEDULE_URL: ""
+  # MatTracker, where members watch the class videos a coach tags them in.
+  # Set, the confirmation email tells anyone who trains how to sign in there.
+  MATTRACKER_URL: ""
   # One-week follow-up email inviting trial guests to become members.
   FOLLOWUP_ENABLED: "true"
   FOLLOWUP_DELAY_DAYS: "7"
