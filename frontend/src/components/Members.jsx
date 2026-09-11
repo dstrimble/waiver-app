@@ -34,7 +34,13 @@ function MembersPanel({ members }) {
     <>
       <StatTiles
         tiles={[
-          { label: "Current members", value: members.totals.members },
+          {
+            label: "Current members",
+            value: members.totals.members,
+            note: members.totals.coaches
+              ? `${members.totals.coaches} coach${members.totals.coaches === 1 ? "" : "es"} on the coach discount not counted`
+              : undefined,
+          },
           { label: "Children added", value: members.totals.children, note: "Add Child, counted apart" },
           {
             label: "Joined this month",
@@ -47,7 +53,7 @@ function MembersPanel({ members }) {
 
       <MembersOverTime
         timeline={members.timeline}
-        subtitle="From Squarespace charges - a member counts until a renewal is a week overdue"
+        subtitle="From Squarespace charges - a member counts until a renewal is a week overdue. Coaches are left out."
       />
 
       <section className="viz-card">
@@ -55,7 +61,8 @@ function MembersPanel({ members }) {
           <div>
             <h3>Current members</h3>
             <p className="viz-sub">
-              {members.current.length} paying accounts. Add Child is shown apart from the plan.
+              {members.current.length} paying accounts, not counting coaches. Add Child is shown
+              apart from the plan.
             </p>
           </div>
         </header>
