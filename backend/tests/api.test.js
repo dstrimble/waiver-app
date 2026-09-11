@@ -719,7 +719,14 @@ describe("squarespace members", () => {
 
     const stats = buildMemberStats(orders, opts);
 
-    expect(stats.totals).toEqual({ members: 1, children: 2, allTimeMembers: 1, coaches: 0 });
+    expect(stats.totals).toEqual({
+      members: 1,
+      children: 2,
+      allTimeMembers: 1,
+      coaches: 0,
+      // Pat's $100 plan plus two $25 Add Child plans.
+      monthlyRevenue: 150,
+    });
     const pat = stats.current.find((r) => r.email === "pat@example.com");
     expect(pat.plans).toEqual(["Physical Membership"]);
     expect(pat.addChild).toBe(true);
@@ -747,7 +754,7 @@ describe("squarespace members", () => {
 
     const stats = buildMemberStats(orders, opts);
 
-    expect(stats.totals).toMatchObject({ members: 1, allTimeMembers: 1, coaches: 2 });
+    expect(stats.totals).toMatchObject({ members: 1, allTimeMembers: 1, coaches: 2, monthlyRevenue: 100 });
     expect(stats.current.map((r) => r.email)).toEqual(["pat@example.com"]);
     expect(stats.timeline[stats.timeline.length - 1].members).toBe(1);
   });
@@ -765,6 +772,8 @@ describe("squarespace members", () => {
 
     expect(stats.totals.members).toBe(1);
     expect(stats.current[0]).toMatchObject({ annualAmount: 1100, monthlyAmount: 0 });
+    // A year paid up front counts as a twelfth of it each month.
+    expect(stats.totals.monthlyRevenue).toBe(91.67);
   });
 
   it("reports what members pay after discounts", () => {

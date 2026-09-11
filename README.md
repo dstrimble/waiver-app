@@ -290,8 +290,9 @@ With `SQUARESPACE_API_KEY` set, the membership page (`/admin/members`) shows
 members and sales read from the Squarespace Orders API:
 
 - **Tiles** - current members, children added, joined and left this month, and
-  members all time; then sales this month and over the last 12 months, split by
-  category.
+  monthly membership revenue (what current members pay each month, Add Child
+  included, with annual plans spread over twelve months); then sales this month
+  and over the last 12 months, split by category.
 - **Members over time** - members and children added at the end of each month.
 - **Current members** - everyone paying now, with their plan, whether they pay
   for Add Child, when they joined, what they pay, and their last charge.

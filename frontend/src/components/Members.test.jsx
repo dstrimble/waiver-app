@@ -6,7 +6,7 @@ const DATA = {
   configured: true,
   fetchedAt: "2026-09-11T12:00:00Z",
   members: {
-    totals: { members: 1, children: 1, allTimeMembers: 3, coaches: 2 },
+    totals: { members: 1, children: 1, allTimeMembers: 3, coaches: 2, monthlyRevenue: 3591.67 },
     timeline: [
       { month: "2026-08", partial: false, members: 1, children: 0, joined: 1, left: 0 },
       { month: "2026-09", partial: true, members: 1, children: 1, joined: 0, left: 0 },
@@ -53,6 +53,14 @@ describe("MembersSection", () => {
     expect(screen.getByRole("heading", { name: /sales by month/i })).toBeInTheDocument();
     expect(screen.getByText("$1,270")).toBeInTheDocument();
     expect(screen.getByText("Retail, 12 months")).toBeInTheDocument();
+  });
+
+  it("shows monthly membership revenue in place of an all-time count", () => {
+    render(<MembersSection data={DATA} loading={false} error="" onRefresh={() => {}} />);
+
+    const tile = screen.getByText("Monthly membership revenue").closest(".viz-tile");
+    expect(within(tile).getByText("$3,592")).toBeInTheDocument();
+    expect(screen.queryByText(/members all time/i)).not.toBeInTheDocument();
   });
 
   it("says how many coaches were left out of the count", () => {
