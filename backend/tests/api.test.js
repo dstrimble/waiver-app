@@ -1388,13 +1388,14 @@ describe("MatTracker account setup", () => {
     expect(JSON.parse(init.body)).toMatchObject({
       signer: { name: "Jane Smith", email: "jane@example.com" },
       participants: [{ name: "Max Smith" }],
-      waiver_id: "waiver_42",
+      // Keyed on the submission, which every new waiver has.
+      waiver_id: expect.stringMatching(/^waiver_[0-9a-f-]{36}$/),
     });
 
     const stamped = () =>
       queryMock.mock.calls.find(([sql]) => sql.includes("mattracker_synced_at = now()"));
     await waitFor("the success to be recorded", () => Boolean(stamped()));
-    expect(stamped()[1]).toEqual([42]);
+    expect(stamped()[1]).toEqual([[42]]);
   });
 
   it("records a MatTracker failure without failing the submission", async () => {
@@ -1405,7 +1406,7 @@ describe("MatTracker account setup", () => {
     expect(res.status).toBe(201);
     const failure = () => queryMock.mock.calls.find(([sql]) => sql.includes("mattracker_error = $2"));
     await waitFor("the failure to be recorded", () => Boolean(failure()));
-    expect(failure()[1]).toEqual([42, "MatTracker returned HTTP 500: boom"]);
+    expect(failure()[1]).toEqual([[42], "MatTracker returned HTTP 500: boom"]);
     expect(failure()[0]).toMatch(/mattracker_attempts = mattracker_attempts \+ 1/);
   });
 
@@ -1446,7 +1447,7 @@ describe("MatTracker account setup", () => {
     expect(dueParams).toEqual([24, 25]);
     expect(JSON.parse(fetchMock.mock.calls[1][1].body).signer.name).toBe("Pat Parent");
     const failure = queryMock.mock.calls.find(([sql]) => sql.includes("mattracker_error = $2"));
-    expect(failure[1]).toEqual([6, "timed out"]);
+    expect(failure[1]).toEqual([[6], "timed out"]);
   });
 
   it("lets an admin send one waiver again", async () => {
@@ -1480,6 +1481,217 @@ describe("MatTracker account setup", () => {
 
     const anon = await request(createApp()).post("/api/admin/waivers/9/mattracker");
     expect(anon.status).toBe(401);
+  });
+});
+
+describe("family waivers", () => {
+  const FAMILY = {
+    signer: {
+      name: "Jane Smith",
+      email: "Jane@Example.com",
+      cellPhone: "555-0100",
+      heardAbout: "A friend",
+    },
+    participants: [
+      { isSigner: true, dateOfBirth: "1990-04-02", interests: ["BJJ"] },
+      { name: "Max Smith", dateOfBirth: "2016-05-01", interests: ["Kids Classes"] },
+      { name: "Ada Smith", dateOfBirth: "2018-06-01", interests: ["Kids Classes", "BJJ"] },
+    ],
+    accepted: true,
+    signatureName: "Jane Smith",
+    signatureDataUrl: SIGNATURE_PNG,
+  };
+  const STORED = {
+    rows: [21, 22, 23].map((id) => ({ id, submitted_at: "2026-09-11T20:00:00.000Z" })),
+  };
+  // Columns in insert order, for reading one row back out of the parameters.
+  const COL = { submission: 0, interests: 1, name: 2, parent: 3, email: 10, dob: 11, signature: 19 };
+  const submitFamily = (body = FAMILY) => request(createApp()).post("/api/waivers").send(body);
+  const insertCall = () => queryMock.mock.calls.find(([sql]) => sql.includes("INSERT INTO waiver_submissions"));
+  // A submission emails and renders its PDF after responding; let that finish
+  // so it cannot land in the next test's mocks.
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 150));
+
+  beforeEach(async () => {
+    await settle();
+    queryMock.mockReset();
+    queryMock.mockResolvedValue(STORED);
+    sendMailMock.mockReset();
+    sendMailMock.mockResolvedValue({ messageId: "<abc@local>", accepted: [], rejected: [] });
+    process.env.WAIVER_NOTIFY_EMAIL = "gravitasmma@gmail.com";
+  });
+
+  afterEach(async () => {
+    await settle();
+    delete process.env.SPARTRACKER_WAIVER_URL;
+    delete process.env.SPARTRACKER_WAIVER_TOKEN;
+    vi.unstubAllGlobals();
+  });
+
+  it("stores one row per person under one submission, in one statement", async () => {
+    const res = await submitFamily();
+
+    expect(res.status).toBe(201);
+    expect(res.body.ids).toEqual([21, 22, 23]);
+    const [sql, params] = insertCall();
+    expect(sql).toMatch(/INSERT INTO waiver_submissions/);
+    expect(params).toHaveLength(60);
+    const rows = [0, 1, 2].map((i) => params.slice(i * 20, i * 20 + 20));
+    expect(rows[0][COL.submission]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(new Set(rows.map((r) => r[COL.submission])).size).toBe(1);
+    expect(rows.map((r) => r[COL.name])).toEqual(["Jane Smith", "Max Smith", "Ada Smith"]);
+    // The children are signed for by the parent; the parent signed for themselves.
+    expect(rows.map((r) => r[COL.parent])).toEqual([null, "Jane Smith", "Jane Smith"]);
+    expect(rows.map((r) => r[COL.interests])).toEqual([["BJJ"], ["Kids Classes"], ["Kids Classes", "BJJ"]]);
+    expect(rows.map((r) => r[COL.dob])).toEqual(["1990-04-02", "2016-05-01", "2018-06-01"]);
+    // Contact details and the one signature go on every row.
+    expect(new Set(rows.map((r) => r[COL.email]))).toEqual(new Set(["Jane@Example.com"]));
+    expect(rows.every((r) => r[COL.signature] === SIGNATURE_PNG)).toBe(true);
+  });
+
+  it("stores kids alone when the parent does not train", async () => {
+    queryMock.mockResolvedValue({ rows: STORED.rows.slice(0, 2) });
+
+    const res = await submitFamily({ ...FAMILY, participants: FAMILY.participants.slice(1) });
+
+    expect(res.status).toBe(201);
+    const params = insertCall()[1];
+    expect(params).toHaveLength(40);
+    expect([params[COL.name], params[20 + COL.name]]).toEqual(["Max Smith", "Ada Smith"]);
+    expect([params[COL.parent], params[20 + COL.parent]]).toEqual(["Jane Smith", "Jane Smith"]);
+  });
+
+  it("sends one confirmation for the whole family", async () => {
+    await submitFamily();
+    await waitFor("both emails", () => sendMailMock.mock.calls.length === 2);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(sendMailMock).toHaveBeenCalledTimes(2);
+    const gym = sendMailMock.mock.calls.find(([m]) => m.to === "gravitasmma@gmail.com")[0];
+    expect(gym.subject).toBe("New waiver: Jane Smith, Max Smith and Ada Smith");
+    expect(gym.text).toContain("Participant 2: Max Smith - born 2016-05-01 - Kids Classes");
+    expect(gym.text).toContain("Reference: #21, #22, #23");
+    const parent = sendMailMock.mock.calls.find(([m]) => m.to === "Jane@Example.com")[0];
+    expect(parent.text).toContain("Hi Jane,");
+    expect(parent.text).toContain("for yourself, Max Smith and Ada Smith.");
+    expect(parent.attachments).toHaveLength(1);
+    expect(parent.attachments[0].filename).toMatch(/^waiver-jane-smith-/);
+
+    // Recorded against every person on the waiver.
+    const outcome = queryMock.mock.calls.find(([sql]) => sql.includes("notification_error = $3"));
+    expect(outcome[0]).toMatch(/WHERE id = ANY\(\$1\)/);
+    expect(outcome[1][0]).toEqual([21, 22, 23]);
+  });
+
+  it("names the parent as signer when only children are on the waiver", async () => {
+    queryMock.mockResolvedValue({ rows: STORED.rows.slice(0, 2) });
+    await submitFamily({ ...FAMILY, participants: FAMILY.participants.slice(1) });
+    await waitFor("both emails", () => sendMailMock.mock.calls.length === 2);
+
+    const gym = sendMailMock.mock.calls.find(([m]) => m.to === "gravitasmma@gmail.com")[0];
+    expect(gym.subject).toBe("New waiver: Max Smith and Ada Smith (signed by Jane Smith)");
+    expect(gym.text).toContain("Signed by (parent / guardian): Jane Smith");
+  });
+
+  it("renders one PDF covering everyone on the waiver", async () => {
+    const pdf = await renderWaiverPdf({
+      ...SUBMISSION,
+      ids: [21, 22],
+      signerName: "Jane Smith",
+      name: "Jane Smith",
+      participants: [
+        { id: 21, name: "Max Smith", dateOfBirth: "2016-05-01", interests: ["Kids Classes"], isSigner: false },
+        { id: 22, name: "Ada Smith", dateOfBirth: "2018-06-01", interests: [], isSigner: false },
+      ],
+    });
+
+    expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");
+    expect(waiverPdfFilename({ signerName: "Jane Smith", submittedAt: "2026-09-11T20:00:00Z" })).toBe(
+      "waiver-jane-smith-2026-09-11.pdf"
+    );
+  });
+
+  it.each([
+    ["nobody is listed", { participants: [] }, /at least one person/],
+    [
+      "more than ten people are listed",
+      { participants: Array.from({ length: 11 }, (_, i) => ({ name: `Kid ${i}`, dateOfBirth: "2016-01-01" })) },
+      /at most 10/,
+    ],
+    ["someone under 18 signs for themselves", { participants: [{ isSigner: true, dateOfBirth: "2012-01-01" }] }, /under 18 needs a parent/],
+    ["an adult is listed as a child", { participants: [{ name: "Grown Kid", dateOfBirth: "1999-01-01" }] }, /18 or over and needs to sign/],
+    ["a child has no name", { participants: [{ name: "", dateOfBirth: "2016-01-01" }] }, /needs a name/],
+    [
+      "the signer is listed twice",
+      { participants: [{ isSigner: true, dateOfBirth: "1990-01-01" }, { isSigner: true, dateOfBirth: "1990-01-01" }] },
+      /only be listed once/,
+    ],
+  ])("refuses a waiver where %s", async (_label, change, message) => {
+    const res = await submitFamily({ ...FAMILY, ...change });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(message);
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+
+  it("sets up the whole family in MatTracker with one call", async () => {
+    process.env.SPARTRACKER_WAIVER_URL = "https://mattracker.example.com/api/waiver-signed";
+    process.env.SPARTRACKER_WAIVER_TOKEN = "waiver-token";
+    const fetchMock = vi.fn(() => Promise.resolve({ ok: true, text: () => Promise.resolve("{}") }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await submitFamily();
+    await waitFor("the MatTracker call", () => fetchMock.mock.calls.length === 1);
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.signer).toEqual({ name: "Jane Smith", email: "jane@example.com" });
+    expect(body.participants).toEqual([{ name: "Jane Smith" }, { name: "Max Smith" }, { name: "Ada Smith" }]);
+    expect(body.waiver_id).toMatch(/^waiver_[0-9a-f-]{36}$/);
+    const stamped = () => queryMock.mock.calls.find(([sql]) => sql.includes("mattracker_synced_at = now()"));
+    await waitFor("the family to be marked synced", () => Boolean(stamped()));
+    expect(stamped()[1]).toEqual([[21, 22, 23]]);
+  });
+
+  it("follows a family up once, greeting the parent", async () => {
+    queryMock.mockImplementation((sql) =>
+      Promise.resolve(
+        sql.includes("RETURNING w.id")
+          ? { rows: [{ id: 22, name: "Jane Smith", email: "jane@example.com" }] }
+          : { rows: [] }
+      )
+    );
+
+    const result = await sendDueFollowUps();
+
+    expect(result).toEqual({ sent: 1, failed: 0 });
+    const [claimSql] = queryMock.mock.calls[0];
+    // Only one waiver per submission is ever claimed, and it greets the signer.
+    expect(claimSql).toMatch(/c\.id = \(\s*SELECT min\(s\.id\)/);
+    expect(claimSql).toMatch(/COALESCE\(w\.parent_name, w\.name\) AS name/);
+    expect(sendMailMock.mock.calls[0][0].text).toContain("Hi Jane,");
+    // Sending marks the rest of the family as followed up too.
+    const confirm = queryMock.mock.calls.find(([sql]) => sql.includes("followup_error = NULL"));
+    expect(confirm[0]).toMatch(/submission_id = \(SELECT submission_id FROM waiver_submissions WHERE id = \$1\)/);
+    expect(confirm[1]).toEqual([22]);
+  });
+
+  it("still accepts the one-person form from a page loaded before this change", async () => {
+    queryMock.mockResolvedValue({ rows: [STORED.rows[0]] });
+
+    const res = await request(createApp()).post("/api/waivers").send({
+      name: "Kit Kid",
+      parentName: "Pat Parent",
+      email: "pat@example.com",
+      dateOfBirth: "2017-03-03",
+      interests: ["Kids Classes"],
+      accepted: true,
+      signatureName: "Pat Parent",
+      signatureDataUrl: SIGNATURE_PNG,
+    });
+
+    expect(res.status).toBe(201);
+    const params = insertCall()[1];
+    expect([params[COL.name], params[COL.parent], params[COL.dob]]).toEqual(["Kit Kid", "Pat Parent", "2017-03-03"]);
   });
 });
 

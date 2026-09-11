@@ -4,6 +4,7 @@ import {
   WAIVER_PARAGRAPHS,
   WAIVER_TEXT_VERSION,
 } from "./waiverText.js";
+import { joinNames, participantsOf, referencesOf, signerNameOf } from "./waiverPeople.js";
 
 const MARGIN = 54;
 const INK = "#111111";
@@ -99,7 +100,7 @@ export function renderWaiverPdf(submission, { gymName = "Gravitas Mixed Martial 
       size: "LETTER",
       margin: MARGIN,
       info: {
-        Title: `Waiver & Release - ${submission.name || "Guest"}`,
+        Title: `Waiver & Release - ${signerNameOf(submission) || "Guest"}`,
         Author: gymName,
         Subject: `Signed waiver (${submission.waiverTextVersion || WAIVER_TEXT_VERSION})`,
       },
@@ -119,30 +120,42 @@ export function renderWaiverPdf(submission, { gymName = "Gravitas Mixed Martial 
         .fillColor(MUTED)
         .text(`Submitted: ${formatTimestamp(submission.submittedAt)}`)
         .text(
-          `Reference: #${submission.id ?? "-"}   |   Waiver text version: ${
+          `Reference: ${referencesOf(submission)}   |   Waiver text version: ${
             submission.waiverTextVersion || WAIVER_TEXT_VERSION
           }`
         );
 
-      sectionHeading(doc, "Guest Information");
-      const interests = Array.isArray(submission.interests) ? submission.interests : [];
+      const people = participantsOf(submission);
+      const signerName = signerNameOf(submission);
+      const minors = people.filter((person) => !person.isSigner);
       const addressLine = [submission.address, submission.city, submission.state, submission.zip]
         .filter(Boolean)
         .join(", ");
+
+      sectionHeading(doc, minors.length ? "Parent / Guardian" : "Guest Information");
       fieldRows(doc, [
-        ["Name", submission.name],
-        ["Parent / Guardian", submission.parentName],
-        ["Date of Birth", formatDateOnly(submission.dateOfBirth)],
+        ["Name", signerName],
         ["Email", submission.email],
         ["Cell Phone", submission.cellPhone],
         ["Home Phone", submission.homePhone],
         ["Address", addressLine],
-        ["Interested In", interests.join(", ")],
         ["Member At Another Gym", submission.otherGymMember],
         ["Membership Expires", submission.membershipExpires],
         ["Heard About Us", submission.heardAbout],
         ["Looking For In A Club", submission.lookingFor],
       ]);
+
+      // Everyone the one signature covers, each with their own classes.
+      sectionHeading(doc, people.length > 1 ? `Participants (${people.length})` : "Participant");
+      people.forEach((person, index) => {
+        if (index) doc.moveDown(0.5);
+        fieldRows(doc, [
+          ["Name", person.isSigner ? `${person.name} (signer)` : person.name],
+          ["Date of Birth", formatDateOnly(person.dateOfBirth)],
+          ["Interested In", (Array.isArray(person.interests) ? person.interests : []).join(", ")],
+          ...(person.isSigner ? [] : [["Signed For By", `${signerName} (parent / guardian)`]]),
+        ]);
+      });
 
       sectionHeading(doc, "Waiver & Release");
       doc.font("Helvetica").fontSize(9.5).fillColor(INK);
@@ -164,6 +177,14 @@ export function renderWaiverPdf(submission, { gymName = "Gravitas Mixed Martial 
         .text(
           `${submission.accepted ? "[X]" : "[ ]"} ${WAIVER_ACCEPTANCE_STATEMENT}`
         );
+      if (minors.length) {
+        doc.moveDown(0.4);
+        doc.text(
+          `Signed by ${signerName} as parent or legal guardian of ${joinNames(
+            minors.map((person) => person.name)
+          )}.`
+        );
+      }
       doc.moveDown(0.8);
 
       const signature = decodeSignature(submission.signatureDataUrl);
@@ -207,7 +228,7 @@ export function renderWaiverPdf(submission, { gymName = "Gravitas Mixed Martial 
 }
 
 export function waiverPdfFilename(submission) {
-  const slug = String(submission.name || "guest")
+  const slug = String(signerNameOf(submission) || "guest")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")

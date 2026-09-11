@@ -14,8 +14,24 @@ const WAIVERS = [
     submitted_at: "2026-08-01T12:00:00Z",
     mattracker_error: "MatTracker returned HTTP 503",
   },
-  { id: "2", name: "Kit Kid", email: "parent@example.com", date_of_birth: bornYearsAgo(9), submitted_at: "2026-08-02T12:00:00Z" },
-  { id: "3", name: "Teen Fourteen", email: "teen@example.com", date_of_birth: bornYearsAgo(14), submitted_at: "2026-08-03T12:00:00Z" },
+  {
+    id: "2",
+    name: "Kit Kid",
+    parent_name: "Pat Parent",
+    submission_id: "family-1",
+    email: "parent@example.com",
+    date_of_birth: bornYearsAgo(9),
+    submitted_at: "2026-08-02T12:00:00Z",
+  },
+  {
+    id: "3",
+    name: "Teen Fourteen",
+    parent_name: "Pat Parent",
+    submission_id: "family-1",
+    email: "parent@example.com",
+    date_of_birth: bornYearsAgo(14),
+    submitted_at: "2026-08-02T12:00:00Z",
+  },
   { id: "4", name: "Old Member", email: "member@example.com", date_of_birth: null, submitted_at: "2026-08-04T12:00:00Z" },
 ];
 
@@ -106,6 +122,19 @@ describe("WaiverAdmin list", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Became members" }));
     expect(names()).toEqual(["Ada Adult"]);
+  });
+
+  it("shows which waivers a parent signed together", async () => {
+    render(<WaiverAdmin auth={{ passcode: "x" }} />);
+    await waitForList();
+
+    expect(within(rowFor("Kit Kid")).getByText("Family of 2")).toBeInTheDocument();
+    expect(within(rowFor("Ada Adult")).queryByText(/family of/i)).not.toBeInTheDocument();
+
+    fireEvent.click(rowFor("Kit Kid"));
+    expect(screen.getByText("Pat Parent (parent / guardian)")).toBeInTheDocument();
+    const sameWaiver = screen.getByText("Same waiver:").closest("p");
+    expect(sameWaiver).toHaveTextContent("Same waiver: Teen Fourteen");
   });
 
   it("shows MatTracker status and sends a waiver again on request", async () => {

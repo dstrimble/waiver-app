@@ -218,7 +218,7 @@ adminRouter.get("/waivers", requireAdmin, async (req, res) => {
         notification_sent_at, notification_error,
         followup_sent_at, followup_error, followup_eligible,
         mattracker_synced_at, mattracker_error, mattracker_eligible,
-        archived_at
+        submission_id, archived_at
       FROM waiver_submissions
       ${whereClause}
       ORDER BY submitted_at DESC

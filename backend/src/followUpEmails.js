@@ -35,24 +35,31 @@ export function getFollowUpConfig() {
 // Claim and send are separate so two backends (or an overlapping sweep) can
 // never both pick up the same waiver: the UPDATE stamps the row inside the
 // database, and SKIP LOCKED lets a second sweep move on to the next one.
+//
+// A family signs together and hears back together: only the first unarchived
+// waiver of a submission is ever claimed, sending it marks the rest (see
+// confirmClaim), and the email greets whoever signed - the parent, for a child.
 const CLAIM_DUE_SQL = `
   UPDATE waiver_submissions AS w
      SET followup_sent_at = now()
     FROM (
       SELECT id
-        FROM waiver_submissions
+        FROM waiver_submissions AS c
        WHERE followup_sent_at IS NULL
          AND followup_eligible
          AND archived_at IS NULL
          AND email IS NOT NULL
          AND submitted_at <= now() - make_interval(days => $1::int)
          AND submitted_at >  now() - make_interval(days => $2::int)
+         AND (c.submission_id IS NULL OR c.id = (
+               SELECT min(s.id) FROM waiver_submissions AS s
+                WHERE s.submission_id = c.submission_id AND s.archived_at IS NULL))
        ORDER BY submitted_at
        LIMIT $3
          FOR UPDATE SKIP LOCKED
     ) AS due
    WHERE w.id = due.id
-  RETURNING w.id, w.name, w.email`;
+  RETURNING w.id, COALESCE(w.parent_name, w.name) AS name, w.email`;
 
 async function releaseClaim(id, error) {
   try {
@@ -67,10 +74,16 @@ async function releaseClaim(id, error) {
   }
 }
 
+// Settles the claim and marks the rest of the family sent too, so none of them
+// is followed up again on their own.
 async function confirmClaim(id) {
   try {
     await pool.query(
-      "UPDATE waiver_submissions SET followup_error = NULL WHERE id = $1",
+      `UPDATE waiver_submissions
+          SET followup_error = NULL,
+              followup_sent_at = COALESCE(followup_sent_at, now())
+        WHERE id = $1
+           OR submission_id = (SELECT submission_id FROM waiver_submissions WHERE id = $1)`,
       [id]
     );
   } catch (err) {
@@ -167,7 +180,7 @@ export async function sendFollowUpNow(id) {
     `UPDATE waiver_submissions
         SET followup_sent_at = now()
       WHERE id = $1 AND followup_sent_at IS NULL AND archived_at IS NULL
-      RETURNING id, name, email`,
+      RETURNING id, COALESCE(parent_name, name) AS name, email`,
     [id]
   );
   if (!claimed.rows.length) return { status: "already-sent" };

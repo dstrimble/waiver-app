@@ -220,6 +220,17 @@ export default function WaiverAdmin({ auth }) {
     if (listFilter === "joined") return outcomes?.[row.id]?.status === "joined";
     return ageGroup(ageFrom(row.date_of_birth)) === listFilter;
   });
+  // Waivers a parent signed together, by submission.
+  const familySizes = useMemo(() => {
+    const sizes = {};
+    for (const row of waivers) {
+      if (row.submission_id) sizes[row.submission_id] = (sizes[row.submission_id] || 0) + 1;
+    }
+    return sizes;
+  }, [waivers]);
+  const siblings = selectedWaiver?.submission_id
+    ? waivers.filter((row) => row.submission_id === selectedWaiver.submission_id && row.id !== selectedWaiver.id)
+    : [];
   const selectedAge = selectedWaiver ? ageFrom(selectedWaiver.date_of_birth) : null;
   const selectedOutcome = selectedWaiver ? outcomes?.[selectedWaiver.id] : null;
 
@@ -376,6 +387,9 @@ export default function WaiverAdmin({ auth }) {
                         {group === "adult" ? "Adult" : "Kid"} · {age}
                       </span>
                     ) : null}
+                    {familySizes[row.submission_id] > 1 ? (
+                      <span className="badge-family">Family of {familySizes[row.submission_id]}</span>
+                    ) : null}
                     {outcome?.status === "joined" ? (
                       <span className="badge-joined">Became a member</span>
                     ) : outcome?.status === "alreadyPaying" ? (
@@ -403,6 +417,17 @@ export default function WaiverAdmin({ auth }) {
               <p>
                 <strong>Email:</strong> {selectedWaiver.email || "-"}
               </p>
+              <p>
+                <strong>Signed by:</strong>{" "}
+                {selectedWaiver.parent_name
+                  ? `${selectedWaiver.parent_name} (parent / guardian)`
+                  : `${selectedWaiver.name} (themselves)`}
+              </p>
+              {siblings.length ? (
+                <p>
+                  <strong>Same waiver:</strong> {siblings.map((row) => row.name).join(", ")}
+                </p>
+              ) : null}
               <p>
                 <strong>Interests:</strong>{" "}
                 {Array.isArray(selectedWaiver.interests) && selectedWaiver.interests.length

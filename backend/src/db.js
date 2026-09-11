@@ -72,6 +72,15 @@ ALTER TABLE waiver_submissions
 ALTER TABLE waiver_submissions
   ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
 
+-- A parent signing for several children (and perhaps themselves) stores one
+-- row per person under one submission id. Older waivers have none: each was
+-- its own submission.
+ALTER TABLE waiver_submissions
+  ADD COLUMN IF NOT EXISTS submission_id UUID;
+CREATE INDEX IF NOT EXISTS idx_waiver_submission_id
+  ON waiver_submissions (submission_id)
+  WHERE submission_id IS NOT NULL;
+
 -- MatTracker account setup for the person each waiver covers: when it went
 -- through, the last failure, and how many tries it has had.
 ALTER TABLE waiver_submissions

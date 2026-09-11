@@ -32,22 +32,23 @@ export function getMatTrackerConfig() {
 }
 
 /**
- * The waiver-signed call for one waiver. Each waiver here covers one person.
- * A parent's name on it means a parent signed for a child: the parent is the
- * signer and the child the one who trains. Otherwise they signed for
- * themselves and are both.
+ * The waiver-signed call for one submission: the rows of a family signed
+ * together, or a single row. A row with a parent's name was signed for by
+ * that parent; a row without one is the signer, who trains too.
  */
-export function buildWaiverSignedPayload(waiver) {
-  const name = String(waiver.name || "").trim();
-  const parentName = String(waiver.parent_name || "").trim();
+export function buildWaiverSignedPayload(rowsOrRow) {
+  const rows = Array.isArray(rowsOrRow) ? rowsOrRow : [rowsOrRow];
+  const first = rows[0];
+  const self = rows.find((row) => !String(row.parent_name || "").trim());
   return {
     signer: {
-      name: parentName || name,
-      email: String(waiver.email || "").trim().toLowerCase(),
+      name: String(self ? self.name : first.parent_name || "").trim(),
+      email: String(first.email || "").trim().toLowerCase(),
     },
-    participants: [{ name }],
-    waiver_id: `waiver_${waiver.id}`,
-    signed_at: new Date(waiver.submitted_at).toISOString(),
+    participants: rows.map((row) => ({ name: String(row.name || "").trim() })),
+    // Older waivers have no submission id; theirs is the row's own.
+    waiver_id: `waiver_${first.submission_id || first.id}`,
+    signed_at: new Date(first.submitted_at).toISOString(),
   };
 }
 
@@ -72,21 +73,22 @@ async function post(payload, config) {
   }
 }
 
-/** Send one waiver and record how it went. Throws on failure, after recording it. */
-async function syncRow(row, config) {
+/** Send one submission's rows and record how it went on each. Throws on failure, after recording it. */
+async function syncRows(rows, config) {
+  const ids = rows.map((row) => row.id);
   try {
-    await post(buildWaiverSignedPayload(row), config);
+    await post(buildWaiverSignedPayload(rows), config);
   } catch (err) {
     const message = err?.message || String(err);
     try {
       await pool.query(
         `UPDATE waiver_submissions
             SET mattracker_error = $2, mattracker_attempts = mattracker_attempts + 1
-          WHERE id = $1`,
-        [row.id, message.slice(0, 1000)]
+          WHERE id = ANY($1)`,
+        [ids, message.slice(0, 1000)]
       );
     } catch (dbErr) {
-      console.error(`Could not record the MatTracker failure for waiver ${row.id}:`, dbErr);
+      console.error(`Could not record the MatTracker failure for waiver ${ids.join(", ")}:`, dbErr);
     }
     throw new Error(message);
   }
@@ -95,24 +97,52 @@ async function syncRow(row, config) {
     `UPDATE waiver_submissions
         SET mattracker_synced_at = now(), mattracker_error = NULL,
             mattracker_attempts = mattracker_attempts + 1
-      WHERE id = $1`,
-    [row.id]
+      WHERE id = ANY($1)`,
+    [ids]
   );
 }
 
-/** Right after a submission is stored. Never throws. */
-export async function syncNewWaiver(waiver) {
+const ROW_COLUMNS = "id, name, parent_name, email, submitted_at, submission_id";
+
+// A retry or a manual send may start from one row of a family; MatTracker
+// should still hear about the whole family, minus anyone archived since.
+async function withFamilies(rows) {
+  const groups = new Map();
+  for (const row of rows) {
+    const key = row.submission_id || `row:${row.id}`;
+    groups.set(key, [...(groups.get(key) || []), row]);
+  }
+  const submissionIds = [...groups.keys()].filter((key) => !key.startsWith("row:"));
+  if (submissionIds.length) {
+    const { rows: family } = await pool.query(
+      `SELECT ${ROW_COLUMNS} FROM waiver_submissions
+        WHERE submission_id = ANY($1::uuid[]) AND archived_at IS NULL
+        ORDER BY id`,
+      [submissionIds]
+    );
+    for (const key of submissionIds) {
+      const members = family.filter((row) => row.submission_id === key);
+      if (members.length) groups.set(key, members);
+    }
+  }
+  return [...groups.values()];
+}
+
+/** Right after a submission is stored, with every row it was stored under. Never throws. */
+export async function syncNewWaiver(rowsOrRow) {
+  const rows = Array.isArray(rowsOrRow) ? rowsOrRow : [rowsOrRow];
   const config = getMatTrackerConfig();
-  if (!config.enabled || !String(waiver.email || "").trim()) return;
+  if (!config.enabled || !rows.length || !String(rows[0].email || "").trim()) return;
   try {
-    await syncRow(waiver, config);
+    await syncRows(rows, config);
   } catch (err) {
-    console.error(`MatTracker setup for waiver ${waiver.id} failed; it will be retried: ${err.message}`);
+    const ids = rows.map((row) => row.id).join(", ");
+    console.error(`MatTracker setup for waiver ${ids} failed; it will be retried: ${err.message}`);
   }
 }
 
 const DUE_SQL = `
-  SELECT id, name, parent_name, email, submitted_at
+  SELECT ${ROW_COLUMNS}
     FROM waiver_submissions
    WHERE mattracker_synced_at IS NULL
      AND mattracker_eligible
@@ -136,9 +166,9 @@ export async function syncPendingWaivers() {
   const { rows } = await pool.query(DUE_SQL, [MAX_ATTEMPTS, config.batchSize]);
   let sent = 0;
   let failed = 0;
-  for (const row of rows) {
+  for (const family of await withFamilies(rows)) {
     try {
-      await syncRow(row, config);
+      await syncRows(family, config);
       sent += 1;
     } catch {
       failed += 1;
@@ -158,14 +188,15 @@ export async function syncWaiverNow(id) {
   if (!config.enabled) return { status: "disabled" };
 
   const { rows } = await pool.query(
-    "SELECT id, name, parent_name, email, submitted_at, archived_at FROM waiver_submissions WHERE id = $1",
+    `SELECT ${ROW_COLUMNS}, archived_at FROM waiver_submissions WHERE id = $1`,
     [id]
   );
   if (!rows.length) return { status: "not-found" };
   if (rows[0].archived_at) return { status: "archived" };
   if (!String(rows[0].email || "").trim()) return { status: "no-email" };
 
-  await syncRow(rows[0], config);
+  const [family] = await withFamilies([rows[0]]);
+  await syncRows(family, config);
   return { status: "sent" };
 }
 

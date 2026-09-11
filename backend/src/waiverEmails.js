@@ -1,3 +1,5 @@
+import { joinNames, participantsOf, referencesOf, signerNameOf } from "./waiverPeople.js";
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -139,12 +141,21 @@ function signOffHtml(config) {
   )}</p>`;
 }
 
+// " for yourself, Max and Ada" - or nothing when someone signed only for themselves.
+function coversPhrase(submission) {
+  const people = participantsOf(submission);
+  if (people.length === 1 && people[0].isSigner) return "";
+  return ` for ${joinNames(people.map((person) => (person.isSigner ? "yourself" : person.name)))}`;
+}
+
 /** Confirmation for the person who signed, with their waiver PDF attached. */
 export function buildMemberEmail(submission, config) {
+  const greeting = firstName(signerNameOf(submission));
+  const thanks = `Thanks for signing the waiver at ${config.gymName}${coversPhrase(submission)}.`;
   const textParts = [
-    `Hi ${firstName(submission.name)},`,
+    `Hi ${greeting},`,
     "",
-    `Thanks for signing the waiver at ${config.gymName}. A PDF copy is attached for your records.`,
+    `${thanks} A PDF copy is attached for your records.`,
     "",
     ...stepsText(config, "Getting started"),
     ...contactsText(config),
@@ -155,10 +166,8 @@ export function buildMemberEmail(submission, config) {
   const html = htmlShell(
     config.gymName,
     `<h1 style="margin:0 0 16px;font-size:22px;">Your waiver is on file</h1>
-     <p style="margin:0 0 12px;">Hi ${escapeHtml(firstName(submission.name))},</p>
-     <p style="margin:0;">Thanks for signing the waiver at ${escapeHtml(
-       config.gymName
-     )}. A PDF copy is attached for your records.</p>
+     <p style="margin:0 0 12px;">Hi ${escapeHtml(greeting)},</p>
+     <p style="margin:0;">${escapeHtml(thanks)} A PDF copy is attached for your records.</p>
      ${stepsHtml(config, "Getting started")}
      ${contactsHtml(config)}
      ${signOffHtml(config)}`
@@ -214,24 +223,35 @@ export function buildFollowUpEmail(submission, config) {
 
 /** Internal notification to the gym, with the same PDF attached. */
 export function buildGymEmail(submission, config) {
-  const interests = Array.isArray(submission.interests) ? submission.interests : [];
+  const people = participantsOf(submission);
+  const signerName = signerNameOf(submission);
+  const signerTrains = people.some((person) => person.isSigner);
   const rows = [
-    ["Name", submission.name],
+    [signerTrains ? "Name" : "Signed by (parent / guardian)", signerName],
     ["Email", submission.email],
     ["Cell", submission.cellPhone],
-    ["Date of Birth", submission.dateOfBirth],
-    ["Parent / Guardian", submission.parentName],
-    ["Interested In", interests.join(", ")],
+    ...people.map((person, index) => [
+      people.length > 1 ? `Participant ${index + 1}` : "Participant",
+      [
+        person.isSigner ? `${person.name} (signer)` : person.name,
+        person.dateOfBirth ? `born ${person.dateOfBirth}` : "",
+        (Array.isArray(person.interests) ? person.interests : []).join(", "),
+      ]
+        .filter(Boolean)
+        .join(" - "),
+    ]),
     ["Heard About Us", submission.heardAbout],
     ["Looking For", submission.lookingFor],
   ];
+  const reference = referencesOf(submission);
+  const who = joinNames(people.map((person) => person.name));
 
   const text = [
     `New waiver signed at ${config.gymName}.`,
     "",
     ...rows.map(([label, value]) => `${label}: ${fallback(value)}`),
     "",
-    `Reference: #${submission.id ?? "-"}`,
+    `Reference: ${reference}`,
     "The signed waiver PDF is attached.",
   ].join("\n");
 
@@ -250,13 +270,13 @@ export function buildGymEmail(submission, config) {
          )
          .join("")}
      </table>
-     <p style="margin:24px 0 0;color:#555;font-size:14px;">Reference #${escapeHtml(
-       submission.id ?? "-"
+     <p style="margin:24px 0 0;color:#555;font-size:14px;">Reference ${escapeHtml(
+       reference
      )}. The signed waiver PDF is attached.</p>`
   );
 
   return {
-    subject: `New waiver: ${fallback(submission.name)}`,
+    subject: `New waiver: ${fallback(who)}${signerTrains ? "" : ` (signed by ${signerName})`}`,
     text,
     html,
   };
