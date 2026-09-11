@@ -337,17 +337,207 @@ export function SignupsOverTime({ points, granularity, onGranularity }) {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* Members over time - two lines on one axis: members, children added. */
+/* ------------------------------------------------------------------ */
+
+const MEMBER_SERIES = [
+  { key: "members", label: "Members", color: "var(--viz-1)" },
+  { key: "children", label: "Children added", color: "var(--viz-3)" },
+];
+
+export function monthLabel(monthKey) {
+  const [y, m] = monthKey.split("-");
+  return `${MONTHS[Number(m) - 1]} ${y.slice(2)}`;
+}
+
+export function MembersOverTime({ timeline, subtitle }) {
+  const [ref, width] = useMeasure();
+  const [hover, setHover] = useState(null);
+  const height = 240;
+  const pad = { top: 16, right: 28, bottom: 30, left: 44 };
+
+  const points = timeline.map((t) => ({ ...t, label: monthLabel(t.month) }));
+  const n = points.length;
+  const max = Math.max(1, ...points.flatMap((p) => MEMBER_SERIES.map((s) => p[s.key])));
+  const ticks = niceTicks(max);
+  const top = ticks[ticks.length - 1];
+  const plotW = Math.max(0, width - pad.left - pad.right);
+  const plotH = height - pad.top - pad.bottom;
+
+  const xAt = (i) => (n <= 1 ? plotW / 2 : (i / (n - 1)) * plotW);
+  const yAt = (v) => plotH - (v / top) * plotH;
+  const pathFor = (key, from, to) =>
+    points
+      .slice(from, to)
+      .map((p, i) => `${i === 0 ? "M" : "L"}${xAt(from + i)},${yAt(p[key])}`)
+      .join(" ");
+
+  // Same convention as the waiver line: the month in progress is dashed.
+  const partialTail = n > 1 && points[n - 1].partial;
+  const xLabels = labelIndices(n);
+
+  function onMove(e) {
+    if (!n || !plotW) return;
+    const box = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - box.left - pad.left;
+    setHover(Math.max(0, Math.min(n - 1, Math.round((x / plotW) * (n - 1)))));
+  }
+
+  return (
+    <ChartFrame
+      title="Members over time"
+      subtitle={subtitle}
+      table={
+        <SimpleTable
+          columns={["Month", "Members", "Children added", "Joined", "Left"]}
+          rows={points.map((p) => [
+            `${p.label}${p.partial ? " (to date)" : ""}`,
+            formatNumber(p.members),
+            formatNumber(p.children),
+            formatNumber(p.joined),
+            formatNumber(p.left),
+          ])}
+        />
+      }
+    >
+      <Legend series={MEMBER_SERIES.map((s) => ({ key: s.label, color: s.color }))} />
+      <div className="viz-plot" ref={ref}>
+        {width > 0 && n ? (
+          <svg
+            width={width}
+            height={height}
+            role="img"
+            aria-label="Line chart of members and children added per month"
+            onMouseMove={onMove}
+            onMouseLeave={() => setHover(null)}
+          >
+            <g transform={`translate(${pad.left},${pad.top})`}>
+              {ticks.map((t) => (
+                <g key={t}>
+                  <line x1={0} x2={plotW} y1={yAt(t)} y2={yAt(t)} className="viz-gridline" />
+                  <text x={-10} y={yAt(t)} className="viz-axis-label" textAnchor="end" dy="0.32em">
+                    {formatNumber(t)}
+                  </text>
+                </g>
+              ))}
+
+              {MEMBER_SERIES.map((s) => (
+                <g key={s.key}>
+                  <path
+                    d={pathFor(s.key, 0, partialTail ? n - 1 : n)}
+                    className="viz-line"
+                    style={{ stroke: s.color }}
+                  />
+                  {partialTail ? (
+                    <path
+                      d={pathFor(s.key, n - 2, n)}
+                      className="viz-line viz-line-partial"
+                      style={{ stroke: s.color }}
+                    />
+                  ) : null}
+                  {/* Label where each line ends - today's count is the one people want. */}
+                  <text
+                    x={xAt(n - 1) + 8}
+                    y={yAt(points[n - 1][s.key])}
+                    className="viz-point-label"
+                    dy="0.32em"
+                  >
+                    {formatNumber(points[n - 1][s.key])}
+                  </text>
+                </g>
+              ))}
+
+              {hover !== null ? (
+                <>
+                  <line x1={xAt(hover)} x2={xAt(hover)} y1={0} y2={plotH} className="viz-crosshair" />
+                  {MEMBER_SERIES.map((s) => (
+                    <circle
+                      key={s.key}
+                      cx={xAt(hover)}
+                      cy={yAt(points[hover][s.key])}
+                      r={5}
+                      style={{ fill: s.color }}
+                      className="viz-marker"
+                    />
+                  ))}
+                </>
+              ) : null}
+
+              {points.map((p, i) =>
+                xLabels.has(i) ? (
+                  <text
+                    key={`x-${p.month}`}
+                    x={xAt(i)}
+                    y={plotH + 20}
+                    className="viz-axis-label"
+                    textAnchor={i === 0 ? "start" : i === n - 1 ? "end" : "middle"}
+                  >
+                    {p.label}
+                  </text>
+                ) : null
+              )}
+            </g>
+          </svg>
+        ) : null}
+
+        {hover !== null && points[hover] ? (
+          <Tooltip x={pad.left + xAt(hover)} y={pad.top + yAt(points[hover].members)} width={width}>
+            <strong>
+              {points[hover].label}
+              {points[hover].partial ? " (to date)" : ""}
+            </strong>
+            {MEMBER_SERIES.map((s) => (
+              <span key={s.key} style={{ display: "block" }}>
+                <span className="viz-swatch" style={{ background: s.color }} aria-hidden="true" />{" "}
+                {s.label}: {formatNumber(points[hover][s.key])}
+              </span>
+            ))}
+            <span style={{ display: "block" }}>
+              Joined {formatNumber(points[hover].joined)} · Left {formatNumber(points[hover].left)}
+            </span>
+          </Tooltip>
+        ) : null}
+      </div>
+    </ChartFrame>
+  );
+}
+
 /* ------------------------------------------------------------------- */
 /* Interest mix - stacked columns, 4 series, legend + per-segment hover. */
 /* ------------------------------------------------------------------- */
 
 export function InterestMix({ buckets }) {
+  return (
+    <StackedColumns
+      title="Interests over time"
+      subtitle="Counts selections, not people - one waiver can tick more than one class"
+      series={INTEREST_SERIES.map((s) => ({ ...s, label: s.key }))}
+      buckets={buckets}
+    />
+  );
+}
+
+/**
+ * Stacked columns over time. `series` is [{ key, label, color }] and each
+ * bucket is { label, counts: { [key]: value } }. `format` renders values in
+ * the table and tooltip, `tickFormat` the (shorter) axis labels.
+ */
+export function StackedColumns({
+  title,
+  subtitle,
+  series,
+  buckets,
+  actions,
+  format = formatNumber,
+  tickFormat = format,
+}) {
   const [ref, width] = useMeasure();
   const [hover, setHover] = useState(null);
   const height = 260;
   const pad = { top: 16, right: 20, bottom: 34, left: 44 };
 
-  const totals = buckets.map((b) => INTEREST_SERIES.reduce((n, s) => n + (b.counts[s.key] || 0), 0));
+  const totals = buckets.map((b) => series.reduce((n, s) => n + (b.counts[s.key] || 0), 0));
   const max = Math.max(1, ...totals);
   const ticks = niceTicks(max);
   const top = ticks[ticks.length - 1];
@@ -358,29 +548,30 @@ export function InterestMix({ buckets }) {
 
   return (
     <ChartFrame
-      title="Interests over time"
-      subtitle="Counts selections, not people - one waiver can tick more than one class"
+      title={title}
+      subtitle={subtitle}
+      actions={actions}
       table={
         <SimpleTable
-          columns={["Period", ...INTEREST_SERIES.map((s) => s.key), "Total"]}
+          columns={["Period", ...series.map((s) => s.label), "Total"]}
           rows={buckets.map((b, i) => [
             b.label,
-            ...INTEREST_SERIES.map((s) => formatNumber(b.counts[s.key] || 0)),
-            formatNumber(totals[i]),
+            ...series.map((s) => format(b.counts[s.key] || 0)),
+            format(totals[i]),
           ])}
         />
       }
     >
-      <Legend series={INTEREST_SERIES} />
+      <Legend series={series.map((s) => ({ key: s.label, color: s.color }))} />
       <div className="viz-plot" ref={ref}>
         {width > 0 ? (
-          <svg width={width} height={height} role="img" aria-label="Stacked columns of interest selections over time">
+          <svg width={width} height={height} role="img" aria-label={title}>
             <g transform={`translate(${pad.left},${pad.top})`}>
               {ticks.map((t) => (
                 <g key={t}>
                   <line x1={0} x2={plotW} y1={plotH - (t / top) * plotH} y2={plotH - (t / top) * plotH} className="viz-gridline" />
                   <text x={-10} y={plotH - (t / top) * plotH} className="viz-axis-label" textAnchor="end" dy="0.32em">
-                    {formatNumber(t)}
+                    {tickFormat(t)}
                   </text>
                 </g>
               ))}
@@ -389,7 +580,7 @@ export function InterestMix({ buckets }) {
                 const x = bi * band + (band - barW) / 2;
                 let cursor = plotH;
                 // Draw bottom-up so the last drawn segment is the stack's cap.
-                const drawn = INTEREST_SERIES.map((s) => {
+                const drawn = series.map((s) => {
                   const value = bucket.counts[s.key] || 0;
                   if (!value) return null;
                   const full = (value / top) * plotH;
@@ -412,7 +603,7 @@ export function InterestMix({ buckets }) {
                     onMouseEnter={() =>
                       setHover({
                         label: bucket.label,
-                        key: seg.s.key,
+                        key: seg.s.label,
                         value: seg.value,
                         color: seg.s.color,
                         x: pad.left + x + barW / 2,
@@ -446,7 +637,7 @@ export function InterestMix({ buckets }) {
             <strong>{hover.label}</strong>
             <span>
               <span className="viz-swatch" style={{ background: hover.color }} aria-hidden="true" />
-              {hover.key}: {formatNumber(hover.value)}
+              {hover.key}: {format(hover.value)}
             </span>
           </Tooltip>
         ) : null}
@@ -628,7 +819,7 @@ export function StatTiles({ tiles }) {
     <div className="viz-tiles">
       {tiles.map((tile) => (
         <div className="viz-tile" key={tile.label}>
-          <p className="viz-tile-value">{formatNumber(tile.value)}</p>
+          <p className="viz-tile-value">{tile.display ?? formatNumber(tile.value)}</p>
           <p className="viz-tile-label">{tile.label}</p>
           {tile.note ? <p className="viz-tile-note">{tile.note}</p> : null}
         </div>

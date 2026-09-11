@@ -47,6 +47,12 @@ services:
       FOLLOWUP_GRACE_DAYS: "${FOLLOWUP_GRACE_DAYS:-3}"
       FOLLOWUP_POLL_MINUTES: "${FOLLOWUP_POLL_MINUTES:-60}"
       DISPLAY_TIMEZONE: "${DISPLAY_TIMEZONE:-America/New_York}"
+      # Read-only Squarespace API key for the admin members section. Unset, the
+      # section says Squarespace is not connected.
+      SQUARESPACE_API_KEY: "${SQUARESPACE_API_KEY:-}"
+      # OAuth client ID for "Sign in with Google" on the admin page. Unset, only
+      # the passcode is offered.
+      GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:-}"
     depends_on:
       db:
         condition: service_healthy

@@ -1,8 +1,18 @@
+import crypto from "crypto";
 import request from "supertest";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const queryMock = vi.fn();
 const sendMailMock = vi.fn();
+const verifyIdTokenMock = vi.fn();
+
+vi.mock("google-auth-library", () => ({
+  OAuth2Client: class {
+    verifyIdToken(...args) {
+      return verifyIdTokenMock(...args);
+    }
+  },
+}));
 
 vi.mock("../src/db.js", () => ({
   pool: {
@@ -22,6 +32,10 @@ import { renderWaiverPdf, waiverPdfFilename } from "../src/waiverPdf.js";
 import { buildFollowUpEmail, buildGymEmail, buildMemberEmail } from "../src/waiverEmails.js";
 import { getFollowUpConfig, sendDueFollowUps } from "../src/followUpEmails.js";
 import { WAIVER_PARAGRAPHS, WAIVER_TEXT_VERSION } from "../src/waiverText.js";
+import { buildMemberStats } from "../src/memberStats.js";
+import { buildSalesStats } from "../src/salesStats.js";
+import { buildConversionStats } from "../src/conversionStats.js";
+import { resetSquarespaceCache } from "../src/squarespace.js";
 
 // 1x1 transparent PNG - a valid stand-in for a drawn signature.
 const SIGNATURE_PNG =
@@ -649,6 +663,539 @@ describe("admin waiver actions", () => {
     for (const [sql] of queryMock.mock.calls) {
       expect(sql).not.toMatch(/signature_data_url/);
     }
+  });
+});
+
+describe("squarespace members", () => {
+  const NOW = Date.parse("2026-08-20T12:00:00Z");
+  const opts = { now: NOW, timeZone: "UTC" };
+
+  // Orders in the shape the Squarespace client hands over.
+  function order(createdOn, items, extra = {}) {
+    return {
+      id: `${createdOn}-${extra.email || "pat"}`,
+      createdOn: `${createdOn}T12:00:00Z`,
+      email: "pat@example.com",
+      name: "Pat Lee",
+      paymentState: "PAID",
+      items: items.map(([product, paid, type = "PAYWALL_PRODUCT", unitPrice = paid]) => ({
+        product,
+        type,
+        unitPrice,
+        quantity: 1,
+        paid,
+      })),
+      ...extra,
+    };
+  }
+
+  it("counts a member while renewals keep coming and drops them a week after one is missed", () => {
+    const orders = ["2026-06-01", "2026-07-01", "2026-08-01"].map((d) =>
+      order(d, [["Physical Membership", 100]])
+    );
+
+    const active = buildMemberStats(orders, opts);
+    expect(active.totals.members).toBe(1);
+    expect(active.current[0]).toMatchObject({
+      name: "Pat Lee",
+      plans: ["Physical Membership"],
+      addChild: false,
+      monthlyAmount: 100,
+      memberSince: "2026-06-01T12:00:00.000Z",
+    });
+
+    // Last charge Aug 1 covers a month plus a week's grace - gone by Sep 9.
+    const lapsed = buildMemberStats(orders, { ...opts, now: Date.parse("2026-09-09T12:00:00Z") });
+    expect(lapsed.totals.members).toBe(0);
+    expect(lapsed.totals.allTimeMembers).toBe(1);
+  });
+
+  it("tracks Add Child apart and never counts it as a member", () => {
+    const orders = [
+      order("2026-08-01", [["Physical Membership", 100]]),
+      order("2026-08-01", [["Add Child", 25]]),
+      order("2026-08-02", [["Add Child", 25]], { email: "sam@example.com", name: "Sam Roe" }),
+    ];
+
+    const stats = buildMemberStats(orders, opts);
+
+    expect(stats.totals).toEqual({ members: 1, children: 2, allTimeMembers: 1 });
+    const pat = stats.current.find((r) => r.email === "pat@example.com");
+    expect(pat.plans).toEqual(["Physical Membership"]);
+    expect(pat.addChild).toBe(true);
+    const sam = stats.current.find((r) => r.email === "sam@example.com");
+    expect(sam.plans).toEqual([]);
+    expect(sam.memberSince).toBeNull();
+    const august = stats.timeline[stats.timeline.length - 1];
+    expect(august).toMatchObject({ month: "2026-08", members: 1, children: 2, partial: true });
+  });
+
+  it("treats a large charge as a year paid up front", () => {
+    const stats = buildMemberStats([order("2026-01-15", [["Physical Membership", 1100]])], opts);
+
+    expect(stats.totals.members).toBe(1);
+    expect(stats.current[0]).toMatchObject({ annualAmount: 1100, monthlyAmount: 0 });
+  });
+
+  it("reports what members pay after discounts", () => {
+    const discounted = order("2026-08-01", [["Physical Membership", 57.5, "PAYWALL_PRODUCT", 115]]);
+
+    expect(buildMemberStats([discounted], opts).current[0].monthlyAmount).toBe(57.5);
+  });
+
+  it("ignores refunded charges", () => {
+    const refunded = order("2026-08-01", [["Physical Membership", 100]], { paymentState: "REFUNDED" });
+
+    const stats = buildMemberStats([refunded], opts);
+    expect(stats.totals.allTimeMembers).toBe(0);
+    expect(stats.current).toEqual([]);
+  });
+
+  it("counts a returning member as joining again", () => {
+    const orders = ["2026-01-01", "2026-02-01", "2026-06-01", "2026-07-01", "2026-08-01"].map((d) =>
+      order(d, [["Physical Membership", 100]])
+    );
+
+    const byMonth = Object.fromEntries(buildMemberStats(orders, opts).timeline.map((m) => [m.month, m]));
+
+    expect(byMonth["2026-01"]).toMatchObject({ members: 1, joined: 1, left: 0 });
+    // Feb 1's charge runs out in March.
+    expect(byMonth["2026-03"]).toMatchObject({ members: 0, left: 1 });
+    expect(byMonth["2026-04"]).toMatchObject({ members: 0, joined: 0 });
+    expect(byMonth["2026-06"]).toMatchObject({ members: 1, joined: 1 });
+  });
+});
+
+describe("squarespace sales", () => {
+  const NOW = Date.parse("2026-08-20T12:00:00Z");
+
+  function order(month, items, extra = {}) {
+    return {
+      id: `${month}-${items.length}`,
+      createdOn: `${month}-10T12:00:00Z`,
+      email: "",
+      name: "",
+      paymentState: "PAID",
+      items: items.map(([product, type, paid]) => ({ product, type, unitPrice: paid, quantity: 1, paid })),
+      ...extra,
+    };
+  }
+
+  it("splits sales into memberships, retail and events by month", () => {
+    const orders = [
+      order("2026-06", [["Physical Membership", "PAYWALL_PRODUCT", 100]]),
+      order("2026-08", [["Physical Membership", "PAYWALL_PRODUCT", 57.5]]),
+      order("2026-08", [["Lifeaid beverage", "PHYSICAL_PRODUCT", 5]]),
+      order("2026-08", [["Rank Review Tuesday Oct 10 @6pm", "SERVICE", 40]]),
+      // Gear set up as a service is still retail.
+      order("2026-08", [["Gravitas Shorts Pre-Order", "SERVICE", 30]]),
+      order("2026-08", [["Unisex Hoodie", "PHYSICAL_PRODUCT", 999]], { paymentState: "REFUNDED" }),
+    ];
+
+    const sales = buildSalesStats(orders, { now: NOW, timeZone: "UTC" });
+
+    // July had no sales but still gets a zero column.
+    expect(sales.months.map((m) => m.month)).toEqual(["2026-06", "2026-07", "2026-08"]);
+    expect(sales.months[1].total).toBe(0);
+    expect(sales.months[2]).toMatchObject({
+      memberships: 57.5,
+      retail: 35,
+      events: 40,
+      total: 132.5,
+      partial: true,
+    });
+    expect(sales.totals.thisMonth).toBe(132.5);
+    expect(sales.totals.last12).toEqual({ memberships: 157.5, retail: 35, events: 40, total: 232.5 });
+  });
+});
+
+describe("waivers to members", () => {
+  const signer = (email, signedAt, followedUp = false) => ({
+    email,
+    signed_at: `${signedAt}T15:00:00Z`,
+    followed_up: followedUp,
+  });
+  const charge = (email, day, product = "Physical Membership") => ({
+    id: `${email}-${day}`,
+    createdOn: `${day}T15:00:00Z`,
+    email,
+    name: "",
+    paymentState: "PAID",
+    items: [{ product, type: "PAYWALL_PRODUCT", unitPrice: 100, quantity: 1, paid: 100 }],
+  });
+  const opts = { timeZone: "UTC" };
+
+  it("counts signers who went on to pay, and how long it took", () => {
+    const stats = buildConversionStats(
+      [
+        signer("joined@example.com", "2026-07-01", true),
+        signer("paid-first@example.com", "2026-07-10"),
+        signer("never@example.com", "2026-08-02"),
+      ],
+      [
+        charge("joined@example.com", "2026-07-15"),
+        charge("joined@example.com", "2026-08-15"),
+        // Paid a few hours before signing on the same visit - still a conversion.
+        charge("paid-first@example.com", "2026-07-10"),
+      ],
+      opts
+    );
+
+    expect(stats).toMatchObject({ signers: 3, joined: 2, alreadyPaying: 0, medianDaysToJoin: 7 });
+    expect(stats.rate).toBeCloseTo(2 / 3);
+    expect(stats.byMonth).toEqual([
+      { month: "2026-07", signers: 2, joined: 2, rate: 1 },
+      { month: "2026-08", signers: 1, joined: 0, rate: 0 },
+    ]);
+    expect(stats.followUp.sent).toEqual({ signers: 1, joined: 1, rate: 1 });
+    expect(stats.followUp.notSent).toEqual({ signers: 2, joined: 1, rate: 0.5 });
+  });
+
+  it("leaves out people who had paid before they signed", () => {
+    const stats = buildConversionStats(
+      [signer("member@example.com", "2026-07-01")],
+      [charge("member@example.com", "2026-05-01"), charge("member@example.com", "2026-07-02")],
+      opts
+    );
+
+    expect(stats).toMatchObject({ signers: 0, joined: 0, alreadyPaying: 1 });
+  });
+
+  it("counts a parent paying for Add Child as converting", () => {
+    const stats = buildConversionStats(
+      [signer("parent@example.com", "2026-07-01")],
+      [charge("parent@example.com", "2026-07-03", "Add Child")],
+      opts
+    );
+
+    expect(stats.joined).toBe(1);
+  });
+});
+
+describe("GET /api/admin/squarespace", () => {
+  const auth = (req) => req.set("x-admin-passcode", "changeme");
+  const recent = new Date(Date.now() - 5 * 86400000).toISOString();
+
+  function rawOrder(id, extra = {}) {
+    return {
+      id,
+      createdOn: recent,
+      customerEmail: " Pat@Example.com ",
+      billingAddress: { firstName: "Pat", lastName: "Lee", address1: "1 Main St" },
+      paymentState: "PAID",
+      testmode: false,
+      subtotal: { value: "115.00" },
+      discountTotal: { value: "57.50" },
+      lineItems: [
+        {
+          productName: "Physical Membership",
+          lineItemType: "PAYWALL_PRODUCT",
+          unitPricePaid: { value: "115.00" },
+          quantity: 1,
+        },
+      ],
+      ...extra,
+    };
+  }
+
+  const page = (result, nextPageCursor) => ({
+    ok: true,
+    json: () =>
+      Promise.resolve({
+        result,
+        pagination: { hasNextPage: Boolean(nextPageCursor), nextPageCursor },
+      }),
+  });
+
+  beforeEach(() => {
+    resetSquarespaceCache();
+    queryMock.mockReset();
+    // The waiver signers matched against members.
+    queryMock.mockResolvedValue({
+      rows: [{ email: "pat@example.com", signed_at: new Date(Date.now() - 6 * 86400000), followed_up: true }],
+    });
+    process.env.ADMIN_PASSCODE = "changeme";
+    process.env.SQUARESPACE_API_KEY = "test-key";
+  });
+
+  afterEach(() => {
+    delete process.env.SQUARESPACE_API_KEY;
+    vi.unstubAllGlobals();
+  });
+
+  it("requires the admin passcode", async () => {
+    const res = await request(createApp()).get("/api/admin/squarespace");
+
+    expect(res.status).toBe(401);
+  });
+
+  it("says Squarespace is not connected when there is no key", async () => {
+    delete process.env.SQUARESPACE_API_KEY;
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await auth(request(createApp()).get("/api/admin/squarespace"));
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ configured: false });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("pages through every order, keeps only what the page needs, and caches it", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(page([rawOrder("a"), rawOrder("test", { testmode: true })], "next-page"))
+      .mockResolvedValueOnce(page([rawOrder("b", { customerEmail: "sam@example.com" })]));
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp();
+
+    const res = await auth(request(app).get("/api/admin/squarespace"));
+
+    expect(res.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][0]).toContain("cursor=next-page");
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer test-key");
+
+    expect(res.body.configured).toBe(true);
+    expect(res.body.members.totals.members).toBe(2);
+    const pat = res.body.members.current.find((r) => r.email === "pat@example.com");
+    // Half off: the discount is taken out of what they pay.
+    expect(pat.monthlyAmount).toBe(57.5);
+    // Test-mode orders and billing addresses never reach the page.
+    expect(res.body.sales.totals.allTime.total).toBe(115);
+    expect(JSON.stringify(res.body)).not.toContain("1 Main St");
+    // Pat signed a waiver six days ago and paid five days ago.
+    expect(res.body.conversion).toMatchObject({ signers: 1, joined: 1, medianDaysToJoin: 1 });
+    // Only email, sign date and follow-up status are read from the waivers.
+    const [waiverSql] = queryMock.mock.calls[0];
+    expect(waiverSql).toMatch(/FROM waiver_submissions/);
+    expect(waiverSql).not.toMatch(/signature_data_url/);
+
+    // Served from cache until a refresh is asked for.
+    await auth(request(app).get("/api/admin/squarespace"));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    fetchMock.mockResolvedValueOnce(page([rawOrder("a")]));
+    await auth(request(app).get("/api/admin/squarespace?refresh=true"));
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("502s when Squarespace refuses the request", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401 }));
+
+    const res = await auth(request(createApp()).get("/api/admin/squarespace"));
+
+    expect(res.status).toBe(502);
+    expect(res.body.error).toMatch(/Squarespace/);
+  });
+});
+
+describe("google sign-in and admin approval", () => {
+  const CLIENT_ID = "client-123.apps.googleusercontent.com";
+  const ticket = (payload) => ({ getPayload: () => payload });
+  const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
+  const passcode = (req) => req.set("x-admin-passcode", "changeme");
+  const bearer = (req) => req.set("Authorization", "Bearer session-token");
+  const googleSignIn = () =>
+    request(createApp()).post("/api/admin/auth/google").send({ credential: "google-id-token" });
+
+  // Answers the session lookup as `user` (or no one), everything else via `rest`.
+  function signedInAs(user, rest = () => ({ rows: [] })) {
+    queryMock.mockImplementation((sql, params) =>
+      Promise.resolve(
+        sql.includes("FROM admin_sessions s") ? { rows: user ? [user] : [] } : rest(sql, params)
+      )
+    );
+  }
+
+  beforeEach(() => {
+    queryMock.mockReset();
+    sendMailMock.mockReset();
+    sendMailMock.mockResolvedValue({ messageId: "<abc@local>", accepted: [], rejected: [] });
+    verifyIdTokenMock.mockReset();
+    process.env.ADMIN_PASSCODE = "changeme";
+    process.env.GOOGLE_CLIENT_ID = CLIENT_ID;
+  });
+
+  afterEach(() => {
+    delete process.env.GOOGLE_CLIENT_ID;
+  });
+
+  it("tells the sign-in page which Google client to use", async () => {
+    const on = await request(createApp()).get("/api/admin/auth/config");
+    expect(on.body).toEqual({ googleClientId: CLIENT_ID });
+
+    delete process.env.GOOGLE_CLIENT_ID;
+    const off = await request(createApp()).get("/api/admin/auth/config");
+    expect(off.body).toEqual({ googleClientId: null });
+  });
+
+  it("refuses Google sign-in when no client is configured", async () => {
+    delete process.env.GOOGLE_CLIENT_ID;
+
+    const res = await googleSignIn();
+
+    expect(res.status).toBe(503);
+    expect(verifyIdTokenMock).not.toHaveBeenCalled();
+  });
+
+  it("files a new Google account as a pending request and emails the gym", async () => {
+    verifyIdTokenMock.mockResolvedValue(
+      ticket({ sub: "g-1", email: "Coach@Example.com", email_verified: true, name: "Coach Kim" })
+    );
+    queryMock.mockResolvedValueOnce({
+      rows: [{ id: "4", email: "coach@example.com", name: "Coach Kim", status: "pending", created: true }],
+    });
+
+    const res = await googleSignIn();
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ status: "pending", email: "coach@example.com" });
+    // The token must have been issued for this app's client, not any Google app.
+    expect(verifyIdTokenMock).toHaveBeenCalledWith({ idToken: "google-id-token", audience: CLIENT_ID });
+    expect(queryMock.mock.calls[0][1]).toEqual(["g-1", "coach@example.com", "Coach Kim"]);
+    // No session until an admin approves them.
+    expect(queryMock.mock.calls.some(([sql]) => sql.includes("admin_sessions"))).toBe(false);
+
+    await waitFor("the request email", () => sendMailMock.mock.calls.length === 1);
+    expect(sendMailMock.mock.calls[0][0].subject).toBe("Admin access request: Coach Kim");
+  });
+
+  it("does not email again when a pending account signs in again", async () => {
+    verifyIdTokenMock.mockResolvedValue(
+      ticket({ sub: "g-1", email: "coach@example.com", email_verified: true })
+    );
+    queryMock.mockResolvedValueOnce({
+      rows: [{ id: "4", email: "coach@example.com", name: "", status: "pending", created: false }],
+    });
+
+    const res = await googleSignIn();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(res.body.status).toBe("pending");
+    expect(sendMailMock).not.toHaveBeenCalled();
+  });
+
+  it("gives an approved account a session and stores only its hash", async () => {
+    verifyIdTokenMock.mockResolvedValue(
+      ticket({ sub: "g-2", email: "owner@example.com", email_verified: true, name: "Owner" })
+    );
+    queryMock
+      .mockResolvedValueOnce({
+        rows: [{ id: "1", email: "owner@example.com", name: "Owner", status: "approved", created: false }],
+      })
+      .mockResolvedValue({ rows: [] });
+
+    const res = await googleSignIn();
+
+    expect(res.body.status).toBe("approved");
+    expect(res.body.user).toEqual({ id: "1", email: "owner@example.com", name: "Owner" });
+    const insert = queryMock.mock.calls.find(([sql]) => sql.includes("INSERT INTO admin_sessions"));
+    expect(insert[1]).toEqual([sha256(res.body.token), "1", 30]);
+  });
+
+  it("turns away a Google account whose email is not verified", async () => {
+    verifyIdTokenMock.mockResolvedValue(
+      ticket({ sub: "g-3", email: "someone@example.com", email_verified: false })
+    );
+
+    const res = await googleSignIn();
+
+    expect(res.status).toBe(401);
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+
+  it("turns away a token Google will not verify", async () => {
+    verifyIdTokenMock.mockRejectedValue(new Error("Wrong recipient, payload audience != requiredAudience"));
+
+    const res = await googleSignIn();
+
+    expect(res.status).toBe(401);
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+
+  it("accepts an approved admin's session on admin routes", async () => {
+    signedInAs({ id: "1", email: "owner@example.com", name: "Owner" });
+
+    const res = await bearer(request(createApp()).get("/api/admin/auth/me"));
+
+    expect(res.status).toBe(200);
+    expect(res.body.user.email).toBe("owner@example.com");
+    const lookup = queryMock.mock.calls.find(([sql]) => sql.includes("FROM admin_sessions s"));
+    // Looked up by hash, and only for accounts still approved and unexpired.
+    expect(lookup[1]).toEqual([sha256("session-token")]);
+    expect(lookup[0]).toMatch(/u\.status = 'approved'/);
+    expect(lookup[0]).toMatch(/expires_at > now\(\)/);
+  });
+
+  it("rejects an unknown, expired or revoked session", async () => {
+    signedInAs(null);
+
+    const res = await bearer(request(createApp()).post("/api/admin/verify"));
+
+    expect(res.status).toBe(401);
+  });
+
+  it("lists access requests for admins only", async () => {
+    const anon = await request(createApp()).get("/api/admin/users");
+    expect(anon.status).toBe(401);
+
+    queryMock.mockResolvedValueOnce({ rows: [{ id: "4", email: "coach@example.com", status: "pending" }] });
+    const res = await passcode(request(createApp()).get("/api/admin/users"));
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(1);
+  });
+
+  it("approves a request and records which admin approved it", async () => {
+    signedInAs({ id: "1", email: "owner@example.com", name: "Owner" }, (sql) =>
+      sql.includes("SET status = 'approved'")
+        ? { rows: [{ id: "4", email: "coach@example.com", status: "approved" }] }
+        : { rows: [] }
+    );
+
+    const res = await bearer(request(createApp()).post("/api/admin/users/4/approve"));
+
+    expect(res.status).toBe(200);
+    const update = queryMock.mock.calls.find(([sql]) => sql.includes("SET status = 'approved'"));
+    expect(update[1]).toEqual([4, "owner@example.com"]);
+  });
+
+  it("records an approval made with the passcode as such", async () => {
+    queryMock.mockResolvedValueOnce({ rows: [{ id: "4", status: "approved" }] });
+
+    await passcode(request(createApp()).post("/api/admin/users/4/approve"));
+
+    expect(queryMock.mock.calls[0][1]).toEqual([4, "passcode"]);
+  });
+
+  it("denies or removes access by deleting the account", async () => {
+    queryMock.mockResolvedValueOnce({ rows: [{ id: "4", email: "coach@example.com" }] });
+
+    const res = await passcode(request(createApp()).delete("/api/admin/users/4"));
+
+    expect(res.status).toBe(200);
+    expect(queryMock.mock.calls[0][0]).toMatch(/DELETE FROM admin_users/);
+  });
+
+  it("will not let an admin remove themselves", async () => {
+    signedInAs({ id: "4", email: "coach@example.com", name: "" });
+
+    const res = await bearer(request(createApp()).delete("/api/admin/users/4"));
+
+    expect(res.status).toBe(400);
+    expect(queryMock.mock.calls.some(([sql]) => sql.includes("DELETE FROM admin_users"))).toBe(false);
+  });
+
+  it("signing out deletes the session", async () => {
+    signedInAs({ id: "1", email: "owner@example.com", name: "Owner" });
+
+    const res = await bearer(request(createApp()).post("/api/admin/auth/logout"));
+
+    expect(res.status).toBe(200);
+    const del = queryMock.mock.calls.find(([sql]) =>
+      sql.includes("DELETE FROM admin_sessions WHERE token_hash")
+    );
+    expect(del[1]).toEqual([sha256("session-token")]);
   });
 });
 

@@ -22,6 +22,99 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  window.history.pushState({}, "", "/");
+});
+
+describe("admin route", () => {
+  it("serves the admin page at /admin", () => {
+    window.history.pushState({}, "", "/admin");
+    render(<App />);
+
+    expect(screen.getByRole("heading", { level: 1, name: /waiver admin/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /unlock admin/i })).toBeInTheDocument();
+  });
+
+  it("no longer serves it at /waiver/admin (nginx redirects that to /admin)", () => {
+    window.history.pushState({}, "", "/waiver/admin");
+    render(<App />);
+
+    expect(screen.getByRole("heading", { level: 1, name: /page not found/i })).toBeInTheDocument();
+  });
+});
+
+describe("admin sign-in", () => {
+  // Answer each API path with its own body; { error } bodies come back as failures.
+  function routeFetch(routes) {
+    const fetchMock = vi.fn((url) => {
+      const body = routes[String(url).split("?")[0]] ?? WAIVER_TEXT;
+      const ok = !body.error;
+      return Promise.resolve({ ok, json: () => Promise.resolve(body) });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  // Node 25 ships its own localStorage that shadows jsdom's and has no working
+  // methods without a backing file, so give each test a fresh in-memory one.
+  beforeEach(() => {
+    const store = new Map();
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: (key) => (store.has(key) ? store.get(key) : null),
+        setItem: (key, value) => store.set(key, String(value)),
+        removeItem: (key) => store.delete(key),
+        clear: () => store.clear(),
+      },
+    });
+  });
+
+  it("offers Google sign-in when a client is configured", async () => {
+    routeFetch({ "/api/admin/auth/config": { googleClientId: "client-123" } });
+    window.history.pushState({}, "", "/admin");
+    render(<App />);
+
+    expect(await screen.findByText(/need an existing admin to approve them/i)).toBeInTheDocument();
+    expect(screen.getByText(/or use the passcode/i)).toBeInTheDocument();
+  });
+
+  it("offers only the passcode when Google is not set up", async () => {
+    const fetchMock = routeFetch({ "/api/admin/auth/config": { googleClientId: null } });
+    window.history.pushState({}, "", "/admin");
+    render(<App />);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/admin/auth/config"));
+    expect(screen.queryByText(/or use the passcode/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /unlock admin/i })).toBeInTheDocument();
+  });
+
+  it("picks a stored Google session back up after a reload", async () => {
+    window.localStorage.setItem("waiver-admin-session", "stored-token");
+    const fetchMock = routeFetch({
+      "/api/admin/auth/config": { googleClientId: "client-123" },
+      "/api/admin/auth/me": { user: { id: "1", email: "owner@example.com", name: "Owner" } },
+      "/api/admin/waivers": [],
+      "/api/admin/users": [],
+      "/api/admin/stats": { error: "not in this test" },
+      "/api/admin/squarespace": { configured: false },
+    });
+    window.history.pushState({}, "", "/admin");
+    render(<App />);
+
+    expect(await screen.findByText("Signed in as owner@example.com")).toBeInTheDocument();
+    const me = fetchMock.mock.calls.find(([url]) => url === "/api/admin/auth/me");
+    expect(me[1].headers).toEqual({ Authorization: "Bearer stored-token" });
+  });
+
+  it("forgets a stored session the backend no longer accepts", async () => {
+    window.localStorage.setItem("waiver-admin-session", "revoked-token");
+    routeFetch({ "/api/admin/auth/me": { error: "Your admin session has ended. Sign in again." } });
+    window.history.pushState({}, "", "/admin");
+    render(<App />);
+
+    await waitFor(() => expect(window.localStorage.getItem("waiver-admin-session")).toBeNull());
+    expect(screen.getByRole("button", { name: /unlock admin/i })).toBeInTheDocument();
+  });
 });
 
 describe("App", () => {

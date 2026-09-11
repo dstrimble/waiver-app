@@ -60,6 +60,17 @@ spec:
                   name: {{ .Values.secret.name }}
                   key: SMTP_PASSWORD
                   optional: true
+            {{- /*
+              Read-only Squarespace API key for the admin members section.
+              Optional for the same reason: without it the section says
+              Squarespace is not connected and everything else works.
+            */}}
+            - name: SQUARESPACE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secret.name }}
+                  key: SQUARESPACE_API_KEY
+                  optional: true
             {{- range $key, $value := .Values.email }}
             {{- if $value }}
             - name: {{ $key }}

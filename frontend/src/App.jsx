@@ -1,15 +1,26 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  adminApproveUser,
   adminChangePasscode,
   adminArchiveWaiver,
+  adminGetMe,
+  adminGetSquarespace,
   adminGetStats,
   adminGetWaivers,
+  adminGoogleSignIn,
+  adminListUsers,
+  adminLogout,
+  adminRemoveUser,
   adminSendFollowUp,
+  getAdminAuthConfig,
   getWaiverText,
   submitWaiver,
   verifyAdmin,
 } from "./api.js";
+import AdminUsers from "./components/AdminUsers.jsx";
+import GoogleSignIn from "./components/GoogleSignIn.jsx";
 import SignaturePad from "./components/SignaturePad.jsx";
+import SquarespaceSection from "./components/Squarespace.jsx";
 import {
   CategoryColumns,
   InterestMix,
@@ -46,7 +57,7 @@ const EMPTY_FORM = {
 export default function App() {
   const pathname = typeof window !== "undefined" ? window.location.pathname : "/";
   const normalizedPath = pathname.replace(/\/+$/, "") || "/";
-  const isAdminPage = normalizedPath === "/waiver/admin";
+  const isAdminPage = normalizedPath === "/admin";
   const isWaiverPage = normalizedPath === "/waiver" || normalizedPath === "/";
 
   if (isAdminPage) return <AdminPage />;
@@ -58,7 +69,7 @@ export default function App() {
         <header className="hero">
           <p className="kicker">Not Found</p>
           <h1>Page Not Found</h1>
-          <p>Use /waiver for the public form or /waiver/admin for administration.</p>
+          <p>Use /waiver for the public form or /admin for administration.</p>
         </header>
       </section>
     </main>
@@ -86,6 +97,15 @@ function AdminPage() {
   const [rowError, setRowError] = useState("");
   const [rowNotice, setRowNotice] = useState(null);
   const [showArchived, setShowArchived] = useState(false);
+  const [squarespace, setSquarespace] = useState(null);
+  const [squarespaceLoading, setSquarespaceLoading] = useState(false);
+  const [squarespaceError, setSquarespaceError] = useState("");
+  const [authConfig, setAuthConfig] = useState(null);
+  const [pendingNotice, setPendingNotice] = useState("");
+  const [adminUsers, setAdminUsers] = useState([]);
+  const [usersBusy, setUsersBusy] = useState(null);
+  const [usersError, setUsersError] = useState("");
+  const [showAccess, setShowAccess] = useState(false);
   const [changeForm, setChangeForm] = useState({
     currentPasscode: "",
     newPasscode: "",
@@ -97,10 +117,42 @@ function AdminPage() {
   const defaultStart = toDateOnly(new Date(today.getTime() - 29 * 86400000));
   const [dateRange, setDateRange] = useState({ start: defaultStart, end: defaultEnd });
 
+  // Load the sign-in options, and pick a Google session back up after a reload.
+  useEffect(() => {
+    let cancelled = false;
+    getAdminAuthConfig()
+      .then((config) => {
+        if (!cancelled) setAuthConfig(config);
+      })
+      .catch(() => {});
+    const token = readStoredToken();
+    if (token) {
+      adminGetMe({ token })
+        .then(({ user }) => {
+          if (!cancelled) enterAdmin({ token, user });
+        })
+        .catch(() => clearStoredToken());
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   function toDisplayDate(value) {
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) return value;
     return d.toLocaleString();
+  }
+
+  // `auth` is { passcode } or, for a Google admin, { token, user }.
+  async function enterAdmin(auth) {
+    setAdmin(auth);
+    setPendingNotice("");
+    // Not awaited: the first Squarespace pull takes several seconds, and the
+    // waiver list should not wait on it.
+    loadSquarespace(auth);
+    loadUsers(auth);
+    await Promise.all([loadWaivers(auth, dateRange.start, dateRange.end), loadStats(auth)]);
   }
 
   async function unlockAdmin(e) {
@@ -108,13 +160,10 @@ function AdminPage() {
     setAdminBusy(true);
     setAdminError("");
     try {
-      await verifyAdmin(passcodeInput);
-      setAdmin({ passcode: passcodeInput });
+      const auth = { passcode: passcodeInput };
+      await verifyAdmin(auth);
       setPasscodeInput("");
-      await Promise.all([
-        loadWaivers(passcodeInput, dateRange.start, dateRange.end),
-        loadStats(passcodeInput),
-      ]);
+      await enterAdmin(auth);
     } catch (err) {
       setAdminError(err.message || "Could not unlock admin.");
     } finally {
@@ -122,11 +171,71 @@ function AdminPage() {
     }
   }
 
-  async function loadWaivers(passcode, start, end, includeArchived = showArchived) {
+  // A Google account only gets in once approved; until then the backend just
+  // files the request.
+  async function signInWithGoogle(credential) {
+    setAdminBusy(true);
+    setAdminError("");
+    setPendingNotice("");
+    try {
+      const result = await adminGoogleSignIn(credential);
+      if (result.status === "approved") {
+        storeToken(result.token);
+        await enterAdmin({ token: result.token, user: result.user });
+      } else {
+        setPendingNotice(
+          `Thanks - your request for ${result.email} is in. An admin has to approve it before you can see anything here; sign in again once they have.`
+        );
+      }
+    } catch (err) {
+      setAdminError(err.message || "Google sign-in failed.");
+    } finally {
+      setAdminBusy(false);
+    }
+  }
+
+  async function loadUsers(auth) {
+    setUsersError("");
+    try {
+      setAdminUsers(await adminListUsers(auth));
+    } catch (err) {
+      setUsersError(err.message || "Failed to load admin access.");
+    }
+  }
+
+  async function approveUser(user) {
+    if (!admin) return;
+    setUsersBusy(user.id);
+    setUsersError("");
+    try {
+      await adminApproveUser(admin, user.id);
+      await loadUsers(admin);
+    } catch (err) {
+      setUsersError(err.message || "Could not approve access.");
+    } finally {
+      setUsersBusy(null);
+    }
+  }
+
+  async function removeUser(user) {
+    if (!admin) return;
+    setUsersBusy(user.id);
+    setUsersError("");
+    try {
+      await adminRemoveUser(admin, user.id);
+      await loadUsers(admin);
+    } catch (err) {
+      setUsersError(err.message || "Could not remove access.");
+    } finally {
+      setUsersBusy(null);
+    }
+  }
+
+  async function loadWaivers(auth, start, end, includeArchived = showArchived) {
     setWaiversLoading(true);
     setWaiversError("");
     try {
-      const rows = await adminGetWaivers(passcode, { start, end, includeArchived });
+      const rows = await adminGetWaivers(auth, { start, end, includeArchived });
       setWaivers(rows);
       setSelectedWaiver((current) => {
         if (!current) return rows[0] || null;
@@ -139,36 +248,48 @@ function AdminPage() {
     }
   }
 
-  async function loadStats(passcode) {
+  async function loadStats(auth) {
     setStatsError("");
     try {
-      setStats(await adminGetStats(passcode));
+      setStats(await adminGetStats(auth));
     } catch (err) {
       setStatsError(err.message || "Failed to load stats.");
     }
   }
 
+  async function loadSquarespace(auth, refresh = false) {
+    setSquarespaceLoading(true);
+    setSquarespaceError("");
+    try {
+      setSquarespace(await adminGetSquarespace(auth, { refresh }));
+    } catch (err) {
+      setSquarespaceError(err.message || "Failed to load Squarespace data.");
+    } finally {
+      setSquarespaceLoading(false);
+    }
+  }
+
   async function runDateFilter(e) {
     e.preventDefault();
-    if (!admin?.passcode) return;
-    await loadWaivers(admin.passcode, dateRange.start, dateRange.end);
+    if (!admin) return;
+    await loadWaivers(admin, dateRange.start, dateRange.end);
   }
 
   // Sending by hand claims the waiver the same way the weekly sweep does, so
   // the automatic follow-up is suppressed and nobody receives two.
   async function sendFollowUpNow(row) {
-    if (!admin?.passcode) return;
+    if (!admin) return;
     setRowBusy(`followup-${row.id}`);
     setRowError("");
     setRowNotice(null);
     try {
-      const result = await adminSendFollowUp(admin.passcode, row.id);
+      const result = await adminSendFollowUp(admin, row.id);
       setRowNotice({
         text: `Follow-up sent to ${result.sentTo}. The automatic one is now cancelled.`,
       });
       await Promise.all([
-        loadWaivers(admin.passcode, dateRange.start, dateRange.end),
-        loadStats(admin.passcode),
+        loadWaivers(admin, dateRange.start, dateRange.end),
+        loadStats(admin),
       ]);
     } catch (err) {
       setRowError(err.message || "Could not send the follow-up.");
@@ -180,12 +301,12 @@ function AdminPage() {
   // Archiving is reversible, so it needs no confirmation dialog - it offers an
   // undo instead, and the record itself is never destroyed.
   async function setArchived(row, archived) {
-    if (!admin?.passcode) return;
+    if (!admin) return;
     setRowBusy(`archive-${row.id}`);
     setRowError("");
     setRowNotice(null);
     try {
-      await adminArchiveWaiver(admin.passcode, row.id, archived);
+      await adminArchiveWaiver(admin, row.id, archived);
       setRowNotice({
         text: archived
           ? `Archived ${row.name}. The signed waiver is kept, just hidden.`
@@ -194,8 +315,8 @@ function AdminPage() {
       });
       if (archived && !showArchived) setSelectedWaiver(null);
       await Promise.all([
-        loadWaivers(admin.passcode, dateRange.start, dateRange.end),
-        loadStats(admin.passcode),
+        loadWaivers(admin, dateRange.start, dateRange.end),
+        loadStats(admin),
       ]);
     } catch (err) {
       setRowError(err.message || "Could not update the waiver.");
@@ -208,16 +329,25 @@ function AdminPage() {
     const next = !showArchived;
     setShowArchived(next);
     setRowNotice(null);
-    if (admin?.passcode) {
-      await loadWaivers(admin.passcode, dateRange.start, dateRange.end, next);
+    if (admin) {
+      await loadWaivers(admin, dateRange.start, dateRange.end, next);
     }
   }
 
   function exitAdmin() {
+    if (admin?.token) {
+      adminLogout(admin).catch(() => {});
+      clearStoredToken();
+    }
     setAdmin(null);
+    setAdminUsers([]);
+    setUsersError("");
+    setShowAccess(false);
     setPasscodeInput("");
     setStats(null);
     setStatsError("");
+    setSquarespace(null);
+    setSquarespaceError("");
     setRowError("");
     setRowNotice(null);
     setShowArchived(false);
@@ -237,14 +367,15 @@ function AdminPage() {
 
   async function submitPasscodeChange(e) {
     e.preventDefault();
-    if (!admin?.passcode) return;
+    if (!admin) return;
 
     setChangeBusy(true);
     setChangeError("");
     setChangeSuccess("");
     try {
-      await adminChangePasscode(admin.passcode, changeForm);
-      setAdmin({ passcode: changeForm.newPasscode });
+      await adminChangePasscode(admin, changeForm);
+      // A Google session is unaffected; a passcode session moves to the new one.
+      setAdmin((current) => (current?.token ? current : { passcode: changeForm.newPasscode }));
       setChangeForm({
         currentPasscode: "",
         newPasscode: "",
@@ -270,6 +401,7 @@ function AdminPage() {
     () => (stats ? bucketByInterest(stats.dailyByInterest, granularity, rangeDays) : []),
     [stats, granularity, rangeDays]
   );
+  const pendingCount = adminUsers.filter((u) => u.status === "pending").length;
   const heardAboutRows = useMemo(
     () => (stats ? foldTail(stats.heardAbout) : []),
     [stats]
@@ -288,8 +420,20 @@ function AdminPage() {
           {admin ? (
             <div className="admin-live">
               <div className="admin-live-head">
-                <h2>Admin</h2>
+                <div>
+                  <h2>Admin</h2>
+                  {admin.user ? <p className="admin-who">Signed in as {admin.user.email}</p> : null}
+                </div>
                 <div className="admin-live-actions">
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => setShowAccess((value) => !value)}
+                    aria-expanded={showAccess}
+                    aria-controls="admin-access-panel"
+                  >
+                    {pendingCount ? `Admin access (${pendingCount} waiting)` : "Admin access"}
+                  </button>
                   <button
                     type="button"
                     className="ghost"
@@ -347,6 +491,17 @@ function AdminPage() {
               ) : null}
               {changeError ? <p className="error">{changeError}</p> : null}
               {changeSuccess ? <p className="success">{changeSuccess}</p> : null}
+
+              {showAccess ? (
+                <AdminUsers
+                  users={adminUsers}
+                  currentUserId={admin.user?.id}
+                  busyId={usersBusy}
+                  onApprove={approveUser}
+                  onRemove={removeUser}
+                />
+              ) : null}
+              {usersError ? <p className="error">{usersError}</p> : null}
 
               {statsError ? <p className="error">{statsError}</p> : null}
 
@@ -413,6 +568,13 @@ function AdminPage() {
                   />
                 </div>
               ) : null}
+
+              <SquarespaceSection
+                data={squarespace}
+                loading={squarespaceLoading}
+                error={squarespaceError}
+                onRefresh={() => loadSquarespace(admin, true)}
+              />
 
               <form className="admin-filters" onSubmit={runDateFilter}>
                 <label>
@@ -619,21 +781,38 @@ function AdminPage() {
               </div>
             </div>
           ) : (
-            <form className="admin-login" onSubmit={unlockAdmin}>
-              <label>
-                Admin Passcode
-                <input
-                  type="password"
-                  value={passcodeInput}
-                  onChange={(e) => setPasscodeInput(e.target.value)}
-                  required
-                />
-              </label>
-              <button type="submit" className="ghost" disabled={adminBusy}>
-                {adminBusy ? "Unlocking..." : "Unlock Admin"}
-              </button>
+            <div className="admin-signin">
+              {authConfig?.googleClientId ? (
+                <>
+                  <GoogleSignIn
+                    clientId={authConfig.googleClientId}
+                    onCredential={signInWithGoogle}
+                    onError={setAdminError}
+                  />
+                  <p className="admin-signin-note">
+                    New Google accounts need an existing admin to approve them before they can
+                    see anything.
+                  </p>
+                  {pendingNotice ? <p className="success">{pendingNotice}</p> : null}
+                  <p className="admin-signin-divider">or use the passcode</p>
+                </>
+              ) : null}
+              <form className="admin-login" onSubmit={unlockAdmin}>
+                <label>
+                  Admin Passcode
+                  <input
+                    type="password"
+                    value={passcodeInput}
+                    onChange={(e) => setPasscodeInput(e.target.value)}
+                    required
+                  />
+                </label>
+                <button type="submit" className="ghost" disabled={adminBusy}>
+                  {adminBusy ? "Unlocking..." : "Unlock Admin"}
+                </button>
+              </form>
               {adminError ? <p className="error">{adminError}</p> : null}
-            </form>
+            </div>
           )}
         </section>
       </section>
@@ -937,6 +1116,34 @@ function PublicWaiverPage() {
       </section>
     </main>
   );
+}
+
+// A Google admin stays signed in across reloads. Storage can be unavailable
+// (private windows, blocked site data); then the session lasts for this visit.
+const SESSION_KEY = "waiver-admin-session";
+
+function readStoredToken() {
+  try {
+    return window.localStorage.getItem(SESSION_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function storeToken(token) {
+  try {
+    window.localStorage.setItem(SESSION_KEY, token);
+  } catch {
+    // see above
+  }
+}
+
+function clearStoredToken() {
+  try {
+    window.localStorage.removeItem(SESSION_KEY);
+  } catch {
+    // see above
+  }
 }
 
 function toDateOnly(date) {
