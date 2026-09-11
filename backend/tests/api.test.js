@@ -255,6 +255,69 @@ describe("waiver api", () => {
     expect(email.text).toContain("member-areas-4");
   });
 
+  describe("MatTracker in the confirmation email", () => {
+    const CONFIG = {
+      gymName: "Gravitas MMA",
+      websiteUrl: "https://www.gravitasmartialarts.com/",
+      mattrackerUrl: "https://mattracker.trimblebarra.com",
+    };
+
+    it("tells someone who trains where to watch their videos and how to sign in", () => {
+      const email = buildMemberEmail(SUBMISSION, CONFIG);
+
+      expect(email.text).toContain("Your training videos");
+      expect(email.text).toContain(
+        "You now have access to MatTracker at https://mattracker.trimblebarra.com, where you can watch your training videos."
+      );
+      expect(email.text).toContain("Sign in with Google using jane@example.com.");
+      expect(email.text).toContain("Once a coach tags you in a class video, it will show up there.");
+      expect(email.html).toContain('href="https://mattracker.trimblebarra.com"');
+      expect(email.html).toContain("<strong>jane@example.com</strong>");
+      // It sits between the thanks and the membership links.
+      expect(email.text.indexOf("Your training videos")).toBeLessThan(email.text.indexOf("visit https://"));
+    });
+
+    it("includes it for a parent who trains alongside their kids", () => {
+      const email = buildMemberEmail(
+        {
+          ...SUBMISSION,
+          signerName: "Jane Doe",
+          participants: [
+            { name: "Jane Doe", isSigner: true },
+            { name: "Max Doe", isSigner: false },
+          ],
+        },
+        CONFIG
+      );
+
+      expect(email.text).toContain("Your training videos");
+    });
+
+    it("leaves it out when only children are on the waiver", () => {
+      const email = buildMemberEmail(
+        { ...SUBMISSION, signerName: "Jane Doe", participants: [{ name: "Max Doe", isSigner: false }] },
+        CONFIG
+      );
+
+      expect(email.text).not.toContain("MatTracker");
+      expect(email.html).not.toContain("MatTracker");
+    });
+
+    it("leaves it out when MATTRACKER_URL is not set", async () => {
+      const { getSiteConfig } = await vi.importActual("../src/siteConfig.js");
+      delete process.env.MATTRACKER_URL;
+
+      expect(getSiteConfig().mattrackerUrl).toBe("");
+      expect(buildMemberEmail(SUBMISSION, { ...CONFIG, mattrackerUrl: "" }).text).not.toContain("MatTracker");
+    });
+
+    it("escapes the email address in the HTML", () => {
+      const email = buildMemberEmail({ ...SUBMISSION, email: '"><script>x</script>@example.com' }, CONFIG);
+
+      expect(email.html).not.toContain("<script>");
+    });
+  });
+
   it("gym email summarizes the submission", () => {
     const email = buildGymEmail(SUBMISSION, { gymName: "Gravitas MMA" });
 

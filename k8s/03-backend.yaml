@@ -59,6 +59,8 @@ spec:
                   optional: true
             - name: SPARTRACKER_WAIVER_URL
               value: "https://mattracker.trimblebarra.com/api/waiver-signed"
+            - name: MATTRACKER_URL
+              value: "https://mattracker.trimblebarra.com"
             - name: SMTP_HOST
               value: "smtp.gmail.com"
             - name: SMTP_PORT

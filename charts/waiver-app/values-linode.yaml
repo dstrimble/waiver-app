@@ -27,6 +27,7 @@ email:
   SIGNUP_URL: "https://www.gravitasmartialarts.com/member-areas-4"
   ACCOUNT_PORTAL_URL: "https://www.gravitasmartialarts.com/account/login"
   SCHEDULE_URL: "https://www.gravitasmartialarts.com/schedule"
+  MATTRACKER_URL: "https://mattracker.trimblebarra.com"
   FOLLOWUP_ENABLED: "true"
   FOLLOWUP_DELAY_DAYS: "7"
   FOLLOWUP_GRACE_DAYS: "3"

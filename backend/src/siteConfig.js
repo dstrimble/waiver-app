@@ -17,6 +17,9 @@ export function getSiteConfig() {
     signupUrl: env("SIGNUP_URL", "https://www.gravitasmartialarts.com/member-areas-4"),
     accountPortalUrl: env("ACCOUNT_PORTAL_URL"),
     scheduleUrl: env("SCHEDULE_URL"),
+    // MatTracker, where members watch class videos they are tagged in. Unset
+    // leaves the "Your training videos" section out of the confirmation.
+    mattrackerUrl: env("MATTRACKER_URL"),
     phone: env("GYM_PHONE"),
     address: env("GYM_ADDRESS"),
   };

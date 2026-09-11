@@ -172,6 +172,7 @@ to ask a coach at the front desk.
 | `SIGNUP_URL` | "Sign up for a membership" link |
 | `ACCOUNT_PORTAL_URL` | "Manage your account" link (billing, contact details) |
 | `SCHEDULE_URL` | "Class schedule" link |
+| `MATTRACKER_URL` | "Your training videos" section: MatTracker access, sign in with Google on the waiver's email, videos appear once a coach tags them. Only when the signer trains - a parent's MatTracker login does not show their children's videos |
 | `DISPLAY_TIMEZONE` | Timezone for PDF timestamps (default `America/New_York`) |
 
 `SMTP_PASSWORD` goes in the `app-secrets` Kubernetes secret; everything else

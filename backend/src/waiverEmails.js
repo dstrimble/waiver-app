@@ -148,6 +148,48 @@ function coversPhrase(submission) {
   return ` for ${joinNames(people.map((person) => (person.isSigner ? "yourself" : person.name)))}`;
 }
 
+// MatTracker is where class videos live, and the waiver has just set up an
+// account there for this email. Only someone who trains has videos to watch:
+// a parent's login does not show their children's videos, so a waiver signed
+// only for children leaves this out rather than promise something MatTracker
+// does not do.
+function videosSection(submission, config) {
+  if (!config.mattrackerUrl) return null;
+  if (!participantsOf(submission).some((person) => person.isSigner)) return null;
+  const email = String(submission.email || "").trim();
+  return {
+    heading: "Your training videos",
+    url: config.mattrackerUrl,
+    signIn: email ? `Sign in with Google using ${email}.` : "Sign in with Google.",
+    tagged: "Once a coach tags you in a class video, it will show up there.",
+    email,
+  };
+}
+
+function videosText(submission, config) {
+  const section = videosSection(submission, config);
+  if (!section) return [];
+  return [
+    section.heading,
+    `You now have access to MatTracker at ${section.url}, where you can watch your training videos. ${section.signIn} ${section.tagged}`,
+    "",
+  ];
+}
+
+function videosHtml(submission, config) {
+  const section = videosSection(submission, config);
+  if (!section) return "";
+  const signIn = section.email
+    ? `Sign in with Google using <strong>${escapeHtml(section.email)}</strong>.`
+    : "Sign in with Google.";
+  return `<h2 style="margin:28px 0 12px;font-size:16px;">${escapeHtml(section.heading)}</h2>
+     <p style="margin:0;">You now have access to <a href="${escapeHtml(
+       section.url
+     )}" style="color:#b3261e;font-weight:600;">MatTracker</a>, where you can watch your training videos. ${signIn} ${escapeHtml(
+       section.tagged
+     )}</p>`;
+}
+
 /** Confirmation for the person who signed, with their waiver PDF attached. */
 export function buildMemberEmail(submission, config) {
   const greeting = firstName(signerNameOf(submission));
@@ -157,6 +199,7 @@ export function buildMemberEmail(submission, config) {
     "",
     `${thanks} A PDF copy is attached for your records.`,
     "",
+    ...videosText(submission, config),
     ...stepsText(config, "Getting started"),
     ...contactsText(config),
     `See you on the mats,`,
@@ -168,6 +211,7 @@ export function buildMemberEmail(submission, config) {
     `<h1 style="margin:0 0 16px;font-size:22px;">Your waiver is on file</h1>
      <p style="margin:0 0 12px;">Hi ${escapeHtml(greeting)},</p>
      <p style="margin:0;">${escapeHtml(thanks)} A PDF copy is attached for your records.</p>
+     ${videosHtml(submission, config)}
      ${stepsHtml(config, "Getting started")}
      ${contactsHtml(config)}
      ${signOffHtml(config)}`
