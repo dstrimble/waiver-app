@@ -89,8 +89,14 @@ export function adminGetStats(auth) {
   }).then(handle);
 }
 
-export function adminGetSquarespace(auth, { refresh } = {}) {
-  return fetch(`/api/admin/squarespace${refresh ? "?refresh=true" : ""}`, {
+export function adminGetMembers(auth, { refresh } = {}) {
+  return fetch(`/api/admin/members${refresh ? "?refresh=true" : ""}`, {
+    headers: authHeaders(auth),
+  }).then(handle);
+}
+
+export function adminGetConversion(auth, { refresh } = {}) {
+  return fetch(`/api/admin/conversion${refresh ? "?refresh=true" : ""}`, {
     headers: authHeaders(auth),
   }).then(handle);
 }
