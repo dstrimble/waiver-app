@@ -36,6 +36,7 @@ import { buildMemberStats } from "../src/memberStats.js";
 import { buildSalesStats } from "../src/salesStats.js";
 import { buildConversionStats } from "../src/conversionStats.js";
 import { resetSquarespaceCache } from "../src/squarespace.js";
+import { buildWaiverSignedPayload, syncPendingWaivers } from "../src/matTracker.js";
 
 // 1x1 transparent PNG - a valid stand-in for a drawn signature.
 const SIGNATURE_PNG =
@@ -1309,6 +1310,176 @@ describe("google sign-in and admin approval", () => {
       sql.includes("DELETE FROM admin_sessions WHERE token_hash")
     );
     expect(del[1]).toEqual([sha256("session-token")]);
+  });
+});
+
+describe("MatTracker account setup", () => {
+  const URL = "https://mattracker.example.com/api/waiver-signed";
+  const auth = (req) => req.set("x-admin-passcode", "changeme");
+  const ok = () => Promise.resolve({ ok: true, text: () => Promise.resolve("{}") });
+  let fetchMock;
+
+  const WAIVER_BODY = {
+    name: "Max Smith",
+    parentName: "Jane Smith",
+    email: "Jane@Example.com",
+    accepted: true,
+    signatureName: "Jane Smith",
+    signatureDataUrl: SIGNATURE_PNG,
+  };
+
+  beforeEach(() => {
+    queryMock.mockReset();
+    queryMock.mockResolvedValue({ rows: [{ id: 42, submitted_at: "2026-09-11T20:00:00.000Z" }] });
+    sendMailMock.mockReset();
+    sendMailMock.mockResolvedValue({ messageId: "<abc@local>", accepted: [], rejected: [] });
+    process.env.ADMIN_PASSCODE = "changeme";
+    process.env.SPARTRACKER_WAIVER_URL = URL;
+    process.env.SPARTRACKER_WAIVER_TOKEN = "waiver-token";
+    fetchMock = vi.fn(ok);
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    delete process.env.SPARTRACKER_WAIVER_URL;
+    delete process.env.SPARTRACKER_WAIVER_TOKEN;
+    vi.unstubAllGlobals();
+  });
+
+  it("sends a parent as the signer and their child as the one who trains", () => {
+    const payload = buildWaiverSignedPayload({
+      id: 42,
+      name: "Max Smith",
+      parent_name: "Jane Smith",
+      email: " Jane@Example.com ",
+      submitted_at: "2026-09-11T20:00:00.000Z",
+    });
+
+    expect(payload).toEqual({
+      signer: { name: "Jane Smith", email: "jane@example.com" },
+      participants: [{ name: "Max Smith" }],
+      waiver_id: "waiver_42",
+      signed_at: "2026-09-11T20:00:00.000Z",
+    });
+  });
+
+  it("sends an adult as both the signer and the one who trains", () => {
+    const payload = buildWaiverSignedPayload({
+      id: 7,
+      name: "Ada Adult",
+      parent_name: null,
+      email: "ada@example.com",
+      submitted_at: new Date("2026-09-11T20:00:00Z"),
+    });
+
+    expect(payload.signer).toEqual({ name: "Ada Adult", email: "ada@example.com" });
+    expect(payload.participants).toEqual([{ name: "Ada Adult" }]);
+  });
+
+  it("sets up the MatTracker account right after a waiver is stored", async () => {
+    const res = await request(createApp()).post("/api/waivers").send(WAIVER_BODY);
+
+    expect(res.status).toBe(201);
+    await waitFor("the MatTracker call", () => fetchMock.mock.calls.length === 1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(URL);
+    expect(init.method).toBe("POST");
+    expect(init.headers.Authorization).toBe("Bearer waiver-token");
+    expect(JSON.parse(init.body)).toMatchObject({
+      signer: { name: "Jane Smith", email: "jane@example.com" },
+      participants: [{ name: "Max Smith" }],
+      waiver_id: "waiver_42",
+    });
+
+    const stamped = () =>
+      queryMock.mock.calls.find(([sql]) => sql.includes("mattracker_synced_at = now()"));
+    await waitFor("the success to be recorded", () => Boolean(stamped()));
+    expect(stamped()[1]).toEqual([42]);
+  });
+
+  it("records a MatTracker failure without failing the submission", async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 500, text: () => Promise.resolve("boom") });
+
+    const res = await request(createApp()).post("/api/waivers").send(WAIVER_BODY);
+
+    expect(res.status).toBe(201);
+    const failure = () => queryMock.mock.calls.find(([sql]) => sql.includes("mattracker_error = $2"));
+    await waitFor("the failure to be recorded", () => Boolean(failure()));
+    expect(failure()[1]).toEqual([42, "MatTracker returned HTTP 500: boom"]);
+    expect(failure()[0]).toMatch(/mattracker_attempts = mattracker_attempts \+ 1/);
+  });
+
+  it("does nothing when MatTracker is not configured", async () => {
+    delete process.env.SPARTRACKER_WAIVER_TOKEN;
+
+    const res = await request(createApp()).post("/api/waivers").send(WAIVER_BODY);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(res.status).toBe(201);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await syncPendingWaivers()).toMatchObject({ skipped: true });
+  });
+
+  it("retries waivers that have not reached MatTracker yet", async () => {
+    queryMock.mockImplementation((sql) =>
+      Promise.resolve(
+        sql.includes("FROM waiver_submissions") && sql.includes("mattracker_attempts <")
+          ? {
+              rows: [
+                { id: 5, name: "Ada Adult", parent_name: null, email: "ada@example.com", submitted_at: "2026-09-11T20:00:00Z" },
+                { id: 6, name: "Kit Kid", parent_name: "Pat Parent", email: "pat@example.com", submitted_at: "2026-09-11T20:05:00Z" },
+              ],
+            }
+          : { rows: [] }
+      )
+    );
+    fetchMock.mockImplementationOnce(ok).mockImplementationOnce(() => Promise.reject(new Error("timed out")));
+
+    const result = await syncPendingWaivers();
+
+    expect(result).toEqual({ sent: 1, failed: 1 });
+    const [dueSql, dueParams] = queryMock.mock.calls[0];
+    // Only new, unarchived, unsent waivers with tries left.
+    expect(dueSql).toMatch(/mattracker_eligible/);
+    expect(dueSql).toMatch(/archived_at IS NULL/);
+    expect(dueSql).toMatch(/mattracker_synced_at IS NULL/);
+    expect(dueParams).toEqual([24, 25]);
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).signer.name).toBe("Pat Parent");
+    const failure = queryMock.mock.calls.find(([sql]) => sql.includes("mattracker_error = $2"));
+    expect(failure[1]).toEqual([6, "timed out"]);
+  });
+
+  it("lets an admin send one waiver again", async () => {
+    queryMock.mockResolvedValueOnce({
+      rows: [{ id: 9, name: "Ada Adult", parent_name: null, email: "ada@example.com", submitted_at: "2026-09-11T20:00:00Z", archived_at: null }],
+    });
+
+    const res = await auth(request(createApp()).post("/api/admin/waivers/9/mattracker"));
+
+    expect(res.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).waiver_id).toBe("waiver_9");
+  });
+
+  it("explains why a manual send could not happen", async () => {
+    queryMock.mockResolvedValueOnce({ rows: [] });
+    const missing = await auth(request(createApp()).post("/api/admin/waivers/9/mattracker"));
+    expect(missing.status).toBe(404);
+
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 401, text: () => Promise.resolve("Invalid token") });
+    queryMock.mockResolvedValueOnce({
+      rows: [{ id: 9, name: "Ada", parent_name: null, email: "ada@example.com", submitted_at: "2026-09-11T20:00:00Z", archived_at: null }],
+    });
+    const refused = await auth(request(createApp()).post("/api/admin/waivers/9/mattracker"));
+    expect(refused.status).toBe(502);
+    expect(refused.body.error).toMatch(/HTTP 401: Invalid token/);
+
+    delete process.env.SPARTRACKER_WAIVER_URL;
+    const off = await auth(request(createApp()).post("/api/admin/waivers/9/mattracker"));
+    expect(off.status).toBe(503);
+
+    const anon = await request(createApp()).post("/api/admin/waivers/9/mattracker");
+    expect(anon.status).toBe(401);
   });
 });
 

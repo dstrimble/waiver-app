@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { pool } from "../db.js";
 import { sendWaiverNotifications } from "../waiverNotifier.js";
+import { syncNewWaiver } from "../matTracker.js";
 import {
   WAIVER_ACCEPTANCE_STATEMENT,
   WAIVER_PARAGRAPHS,
@@ -135,6 +136,16 @@ waiversRouter.post("/", async (req, res) => {
       signatureDataUrl,
     }).catch((err) => {
       console.error("Unexpected waiver notification error:", err);
+    });
+
+    // Likewise the MatTracker account setup: recorded on the row, retried by a
+    // sweep if it fails, and never a reason to fail the submission.
+    syncNewWaiver({
+      id,
+      name,
+      parent_name: parentName,
+      email,
+      submitted_at: submittedAt,
     });
 
     return res.status(201).json({

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { pool } from "../db.js";
 import { hashPasscode, verifyPasscode } from "../adminPasscode.js";
 import { sendFollowUpNow } from "../followUpEmails.js";
+import { syncWaiverNow } from "../matTracker.js";
 import { getWaiverStats } from "../waiverStats.js";
 import { getConversion, getMembersAndSales } from "../squarespaceStats.js";
 import {
@@ -216,6 +217,7 @@ adminRouter.get("/waivers", requireAdmin, async (req, res) => {
         accepted, signature_name, signature_data_url,
         notification_sent_at, notification_error,
         followup_sent_at, followup_error, followup_eligible,
+        mattracker_synced_at, mattracker_error, mattracker_eligible,
         archived_at
       FROM waiver_submissions
       ${whereClause}
@@ -273,6 +275,33 @@ adminRouter.post("/waivers/:id/followup", requireAdmin, async (req, res) => {
     console.error(`Manual follow-up for waiver ${id} failed:`, err);
     // The claim was released, so the sweep can still pick this up later.
     return res.status(502).json({ error: `Could not send the follow-up: ${err.message}` });
+  }
+});
+
+/** Send one waiver to MatTracker now - a retry that ran out, or a second go. */
+adminRouter.post("/waivers/:id/mattracker", requireAdmin, async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid waiver id." });
+
+  try {
+    const result = await syncWaiverNow(id);
+    switch (result.status) {
+      case "sent":
+        return res.json({ ok: true });
+      case "not-found":
+        return res.status(404).json({ error: "Waiver not found." });
+      case "archived":
+        return res.status(409).json({ error: "This waiver is archived. Restore it first." });
+      case "no-email":
+        return res.status(400).json({ error: "This waiver has no email address." });
+      case "disabled":
+        return res.status(503).json({ error: "MatTracker sync is not set up on this server." });
+      default:
+        return res.status(500).json({ error: "Could not send to MatTracker." });
+    }
+  } catch (err) {
+    console.error(`Manual MatTracker send for waiver ${id} failed:`, err);
+    return res.status(502).json({ error: `Could not send to MatTracker: ${err.message}` });
   }
 });
 

@@ -108,6 +108,13 @@ export function adminSendFollowUp(auth, id) {
   }).then(handle);
 }
 
+export function adminSendToMatTracker(auth, id) {
+  return fetch(`/api/admin/waivers/${id}/mattracker`, {
+    method: "POST",
+    headers: authHeaders(auth),
+  }).then(handle);
+}
+
 export function adminArchiveWaiver(auth, id, archived) {
   return fetch(`/api/admin/waivers/${id}/${archived ? "archive" : "restore"}`, {
     method: "POST",

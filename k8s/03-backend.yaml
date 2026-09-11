@@ -51,6 +51,14 @@ spec:
                   name: app-secrets
                   key: SQUARESPACE_API_KEY
                   optional: true
+            - name: SPARTRACKER_WAIVER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: SPARTRACKER_WAIVER_TOKEN
+                  optional: true
+            - name: SPARTRACKER_WAIVER_URL
+              value: "https://mattracker.trimblebarra.com/api/waiver-signed"
             - name: SMTP_HOST
               value: "smtp.gmail.com"
             - name: SMTP_PORT

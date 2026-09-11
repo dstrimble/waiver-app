@@ -5,6 +5,7 @@ import {
   adminGetStats,
   adminGetWaivers,
   adminSendFollowUp,
+  adminSendToMatTracker,
 } from "../api.js";
 import {
   CategoryColumns,
@@ -150,6 +151,23 @@ export default function WaiverAdmin({ auth }) {
       await Promise.all([loadWaivers(dateRange.start, dateRange.end), loadStats()]);
     } catch (err) {
       setRowError(err.message || "Could not send the follow-up.");
+    } finally {
+      setRowBusy("");
+    }
+  }
+
+  // MatTracker treats a repeat as a no-op, so sending again is always safe.
+  async function sendToMatTracker(row) {
+    setRowBusy(`mattracker-${row.id}`);
+    setRowError("");
+    setRowNotice(null);
+    try {
+      await adminSendToMatTracker(auth, row.id);
+      setRowNotice({ text: `${row.name} is set up in MatTracker.` });
+      await loadWaivers(dateRange.start, dateRange.end);
+    } catch (err) {
+      setRowError(err.message || "Could not send to MatTracker.");
+      await loadWaivers(dateRange.start, dateRange.end);
     } finally {
       setRowBusy("");
     }
@@ -452,6 +470,16 @@ export default function WaiverAdmin({ auth }) {
                       ? `Not sent - ${selectedWaiver.followup_error}`
                       : "Not sent yet"}
               </p>
+              <p>
+                <strong>MatTracker:</strong>{" "}
+                {selectedWaiver.mattracker_synced_at
+                  ? `Account set up ${toDisplayDate(selectedWaiver.mattracker_synced_at)}`
+                  : selectedWaiver.mattracker_error
+                    ? `Not set up - ${selectedWaiver.mattracker_error}`
+                    : selectedWaiver.mattracker_eligible === false
+                      ? "Not sent - signed before MatTracker sync"
+                      : "Pending"}
+              </p>
 
               <div className="waiver-actions">
                 <button
@@ -474,6 +502,23 @@ export default function WaiverAdmin({ auth }) {
                     : selectedWaiver.followup_sent_at
                       ? "Follow-up already sent"
                       : "Send follow-up now"}
+                </button>
+                <button
+                  type="button"
+                  className="viz-toggle"
+                  disabled={
+                    rowBusy === `mattracker-${selectedWaiver.id}` ||
+                    Boolean(selectedWaiver.archived_at) ||
+                    !selectedWaiver.email
+                  }
+                  onClick={() => sendToMatTracker(selectedWaiver)}
+                  title="Set up this person's MatTracker account now. Safe to repeat."
+                >
+                  {rowBusy === `mattracker-${selectedWaiver.id}`
+                    ? "Sending..."
+                    : selectedWaiver.mattracker_synced_at
+                      ? "Send to MatTracker again"
+                      : "Send to MatTracker"}
                 </button>
                 {selectedWaiver.archived_at ? (
                   <button

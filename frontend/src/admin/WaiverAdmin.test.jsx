@@ -6,7 +6,14 @@ import WaiverAdmin, { ageFrom } from "./WaiverAdmin.jsx";
 const bornYearsAgo = (years) => `${new Date().getFullYear() - years}-01-01`;
 
 const WAIVERS = [
-  { id: "1", name: "Ada Adult", email: "ada@example.com", date_of_birth: bornYearsAgo(34), submitted_at: "2026-08-01T12:00:00Z" },
+  {
+    id: "1",
+    name: "Ada Adult",
+    email: "ada@example.com",
+    date_of_birth: bornYearsAgo(34),
+    submitted_at: "2026-08-01T12:00:00Z",
+    mattracker_error: "MatTracker returned HTTP 503",
+  },
   { id: "2", name: "Kit Kid", email: "parent@example.com", date_of_birth: bornYearsAgo(9), submitted_at: "2026-08-02T12:00:00Z" },
   { id: "3", name: "Teen Fourteen", email: "teen@example.com", date_of_birth: bornYearsAgo(14), submitted_at: "2026-08-03T12:00:00Z" },
   { id: "4", name: "Old Member", email: "member@example.com", date_of_birth: null, submitted_at: "2026-08-04T12:00:00Z" },
@@ -35,6 +42,7 @@ function stubApi(conversion = CONVERSION) {
     "/api/admin/waivers": WAIVERS,
     "/api/admin/stats": { error: "not in this test" },
     "/api/admin/conversion": conversion,
+    "/api/admin/waivers/1/mattracker": { ok: true },
   };
   vi.stubGlobal(
     "fetch",
@@ -98,6 +106,18 @@ describe("WaiverAdmin list", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Became members" }));
     expect(names()).toEqual(["Ada Adult"]);
+  });
+
+  it("shows MatTracker status and sends a waiver again on request", async () => {
+    render(<WaiverAdmin auth={{ passcode: "x" }} />);
+    await waitForList();
+
+    expect(screen.getByText(/Not set up - MatTracker returned HTTP 503/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Send to MatTracker" }));
+
+    expect(await screen.findByText("Ada Adult is set up in MatTracker.")).toBeInTheDocument();
+    const call = fetch.mock.calls.find(([url]) => url === "/api/admin/waivers/1/mattracker");
+    expect(call[1]).toMatchObject({ method: "POST", headers: { "x-admin-passcode": "x" } });
   });
 
   it("leaves out membership marks when Squarespace is not connected", async () => {

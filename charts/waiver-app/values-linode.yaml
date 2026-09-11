@@ -35,6 +35,9 @@ email:
   # "Sign in with Google" on the admin page. A client ID is public by design;
   # the client secret is never used.
   GOOGLE_CLIENT_ID: "768385890439-812k6cqllqefp7vknhraeso249mnci4k.apps.googleusercontent.com"
+  # Set up MatTracker accounts for new waivers. The token lives in app-secrets
+  # (SPARTRACKER_WAIVER_TOKEN); until it is there, nothing is sent.
+  SPARTRACKER_WAIVER_URL: "https://mattracker.trimblebarra.com/api/waiver-signed"
 
 postgres:
   persistence:

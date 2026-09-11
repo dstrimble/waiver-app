@@ -220,6 +220,45 @@ Sending reuses the same SMTP settings and links as the confirmation email; with
 SMTP unset the sweep logs a warning and does nothing. Docker Compose ships with
 `FOLLOWUP_ENABLED=false` so a local database of old waivers cannot mail anyone.
 
+## MatTracker Accounts
+
+Each new waiver sets up MatTracker (spartracker) accounts for the people it
+covers, so a member's account is waiting the first time they sign in there with
+Google on the same email. The backend calls
+`POST /api/waiver-signed` with:
+
+- **signer** - whoever signed: the parent when the form has a parent's name,
+  otherwise the person themselves, with the waiver's email.
+- **participants** - the one person the waiver covers: the child when a parent
+  signed, otherwise the signer. A parent signing for two children sends two
+  waivers under the same email; MatTracker joins them up.
+- **waiver_id** - `waiver_<id>`, which MatTracker keys on, so a repeat of the
+  same waiver changes nothing.
+
+The call goes out right after the waiver is stored and never fails a signing.
+Its outcome is written to the row (`mattracker_synced_at`, `mattracker_error`),
+a sweep retries failures every `SPARTRACKER_RETRY_MINUTES` (default 30) for 24
+tries - about half a day - and the waiver's detail panel shows the status with a
+**Send to MatTracker** button that sends it again by hand. Only waivers signed
+after this shipped are sent; older ones show "Not sent - signed before MatTracker
+sync", and the button still works for them.
+
+| Variable | Purpose |
+| --- | --- |
+| `SPARTRACKER_WAIVER_URL` | The endpoint, under `email:` in the Helm values |
+| `SPARTRACKER_WAIVER_TOKEN` | Bearer token MatTracker issued for this app only - in `app-secrets` |
+| `SPARTRACKER_RETRY_MINUTES` | How often failures are retried (default `30`) |
+
+With either of the first two unset nothing is sent, and waivers signed meanwhile
+go out once both are present. Docker Compose leaves them unset, so a local run
+never creates real accounts. To add the token to the cluster:
+
+```bash
+kubectl -n gravitas patch secret app-secrets \
+  -p '{"stringData":{"SPARTRACKER_WAIVER_TOKEN":"<token>"}}'
+kubectl -n gravitas rollout restart deploy/backend
+```
+
 ## Admin Dashboard
 
 The waiver page (`/admin/waiver`) shows a set of charts above the waiver list:

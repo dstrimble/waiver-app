@@ -13,6 +13,8 @@ secret:
   smtpPassword: ""
   # Read-only Squarespace API key (Orders) for the admin members section.
   squarespaceApiKey: ""
+  # Bearer token MatTracker (spartracker) issued for /api/waiver-signed.
+  spartrackerWaiverToken: ""
 
 # Non-secret waiver-email settings, passed straight through as backend env vars.
 # Blank values are omitted, and the email leaves out the matching section.
@@ -49,6 +51,9 @@ email:
   # OAuth client ID for "Sign in with Google" on the admin page (not secret).
   # Empty hides the button; the passcode keeps working either way.
   GOOGLE_CLIENT_ID: ""
+  # MatTracker endpoint told about each new waiver, so the people it covers
+  # have accounts. Needs SPARTRACKER_WAIVER_TOKEN in the secret as well.
+  SPARTRACKER_WAIVER_URL: ""
 
 postgres:
   enabled: true
