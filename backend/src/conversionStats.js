@@ -9,12 +9,16 @@ const DAY_MS = 86400000;
 // Some people pay on the spot and sign the waiver a moment later.
 const SAME_VISIT_MS = DAY_MS;
 
-/** One row per waiver email: when they first signed, and whether they got the follow-up. */
+/**
+ * One row per waiver email: when they first signed, whether they got the
+ * follow-up, and every waiver signed under it (a parent often signs several).
+ */
 export async function loadWaiverSigners() {
   const { rows } = await pool.query(
     `SELECT lower(btrim(email)) AS email,
             min(submitted_at) AS signed_at,
-            bool_or(followup_sent_at IS NOT NULL) AS followed_up
+            bool_or(followup_sent_at IS NOT NULL) AS followed_up,
+            array_agg(id) AS waiver_ids
        FROM waiver_submissions
       WHERE archived_at IS NULL AND btrim(COALESCE(email, '')) <> ''
       GROUP BY 1`
@@ -58,18 +62,31 @@ export function buildConversionStats(signers, orders, { timeZone = displayTimezo
 
   let alreadyPaying = 0;
   const outcomes = [];
+  // Per waiver id, so the waiver list can mark who joined without the page
+  // ever receiving a member's email.
+  const byWaiver = {};
+  const mark = (signer, outcome) => {
+    for (const id of signer.waiver_ids || []) byWaiver[String(id)] = outcome;
+  };
+
   for (const signer of signers) {
     const signedAt = new Date(signer.signed_at).getTime();
     const charges = chargesByEmail.get(signer.email) || [];
     if (charges.some((t) => t < signedAt - SAME_VISIT_MS)) {
       alreadyPaying += 1;
+      mark(signer, { status: "alreadyPaying" });
       continue;
     }
     const joinedAt = charges.filter((t) => t >= signedAt - SAME_VISIT_MS).sort((a, b) => a - b)[0];
+    const daysToJoin =
+      joinedAt === undefined ? null : Math.max(0, Math.round((joinedAt - signedAt) / DAY_MS));
+    if (joinedAt !== undefined) {
+      mark(signer, { status: "joined", joinedAt: new Date(joinedAt).toISOString(), daysToJoin });
+    }
     outcomes.push({
       month: dayKey(signedAt, timeZone).slice(0, 7),
       followedUp: Boolean(signer.followed_up),
-      daysToJoin: joinedAt === undefined ? null : Math.max(0, Math.round((joinedAt - signedAt) / DAY_MS)),
+      daysToJoin,
     });
   }
 
@@ -83,5 +100,6 @@ export function buildConversionStats(signers, orders, { timeZone = displayTimezo
       notSent: summarize(outcomes.filter((o) => !o.followedUp)),
     },
     byMonth: months.map((month) => ({ month, ...summarize(outcomes.filter((o) => o.month === month)) })),
+    byWaiver,
   };
 }

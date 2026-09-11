@@ -31,6 +31,33 @@ function toDisplayDate(value) {
   return d.toLocaleString();
 }
 
+// Anyone older than 13 counts as an adult.
+const ADULT_MIN_AGE = 14;
+
+/** Whole years old today, from a YYYY-MM-DD (or ISO) date of birth; null if unknown. */
+export function ageFrom(dateOfBirth, today = new Date()) {
+  const match = String(dateOfBirth || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return null;
+  const [, year, month, day] = match.map(Number);
+  let age = today.getFullYear() - year;
+  if (today.getMonth() + 1 < month || (today.getMonth() + 1 === month && today.getDate() < day)) {
+    age -= 1;
+  }
+  return age >= 0 && age < 120 ? age : null;
+}
+
+function ageGroup(age) {
+  if (age === null) return null;
+  return age >= ADULT_MIN_AGE ? "adult" : "kid";
+}
+
+const LIST_FILTERS = [
+  { key: "all", label: "All" },
+  { key: "adult", label: "Adults" },
+  { key: "kid", label: "Kids" },
+  { key: "joined", label: "Became members" },
+];
+
 /**
  * Waiver page: waiver charts, how many signers became members, and the waiver
  * list with its follow-up and archive actions.
@@ -51,6 +78,7 @@ export default function WaiverAdmin({ auth }) {
   const [conversion, setConversion] = useState(null);
   const [conversionLoading, setConversionLoading] = useState(false);
   const [conversionError, setConversionError] = useState("");
+  const [listFilter, setListFilter] = useState("all");
 
   const today = useMemo(() => new Date(), []);
   const defaultEnd = toDateOnly(today);
@@ -167,6 +195,16 @@ export default function WaiverAdmin({ auth }) {
   );
   const heardAboutRows = useMemo(() => (stats ? foldTail(stats.heardAbout) : []), [stats]);
 
+  // Which waivers turned into members, by waiver id; null until Squarespace answers.
+  const outcomes = conversion?.configured ? conversion.conversion.byWaiver || {} : null;
+  const visibleWaivers = waivers.filter((row) => {
+    if (listFilter === "all") return true;
+    if (listFilter === "joined") return outcomes?.[row.id]?.status === "joined";
+    return ageGroup(ageFrom(row.date_of_birth)) === listFilter;
+  });
+  const selectedAge = selectedWaiver ? ageFrom(selectedWaiver.date_of_birth) : null;
+  const selectedOutcome = selectedWaiver ? outcomes?.[selectedWaiver.id] : null;
+
   return (
     <>
       {statsError ? <p className="error">{statsError}</p> : null}
@@ -268,28 +306,69 @@ export default function WaiverAdmin({ auth }) {
 
       {waiversError ? <p className="error">{waiversError}</p> : null}
 
+      <div className="waiver-list-controls">
+        <div className="viz-segmented" role="group" aria-label="Show waivers">
+          {LIST_FILTERS.filter((f) => f.key !== "joined" || outcomes).map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              className={listFilter === f.key ? "is-active" : ""}
+              aria-pressed={listFilter === f.key}
+              onClick={() => setListFilter(f.key)}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+        {outcomes ? (
+          <p className="waiver-legend">
+            <span className="waiver-legend-swatch" aria-hidden="true" /> Blue: became a paying member
+            after signing
+          </p>
+        ) : null}
+      </div>
+
       <div className="admin-grid">
         <div className="waiver-list" role="list">
-          {waivers.length === 0 ? (
-            <p className="empty-state">No signed waivers found for this period.</p>
+          {visibleWaivers.length === 0 ? (
+            <p className="empty-state">
+              {waivers.length ? "No waivers match this filter." : "No signed waivers found for this period."}
+            </p>
           ) : (
-            waivers.map((row) => (
-              <button
-                key={row.id}
-                type="button"
-                className={`waiver-row ${selectedWaiver?.id === row.id ? "is-selected" : ""} ${
-                  row.archived_at ? "is-archived" : ""
-                }`}
-                onClick={() => setSelectedWaiver(row)}
-              >
-                <strong>
-                  {row.name}
-                  {row.archived_at ? <span className="badge-archived">Archived</span> : null}
-                </strong>
-                <span>{row.email}</span>
-                <span>{toDisplayDate(row.submitted_at)}</span>
-              </button>
-            ))
+            visibleWaivers.map((row) => {
+              const age = ageFrom(row.date_of_birth);
+              const group = ageGroup(age);
+              const outcome = outcomes?.[row.id];
+              return (
+                <button
+                  key={row.id}
+                  type="button"
+                  className={`waiver-row ${selectedWaiver?.id === row.id ? "is-selected" : ""} ${
+                    row.archived_at ? "is-archived" : ""
+                  } ${outcome?.status === "joined" ? "is-converted" : ""}`}
+                  onClick={() => setSelectedWaiver(row)}
+                >
+                  <strong>
+                    {row.name}
+                    {row.archived_at ? <span className="badge-archived">Archived</span> : null}
+                  </strong>
+                  <span className="waiver-row-tags">
+                    {group ? (
+                      <span className={`badge-age is-${group}`}>
+                        {group === "adult" ? "Adult" : "Kid"} · {age}
+                      </span>
+                    ) : null}
+                    {outcome?.status === "joined" ? (
+                      <span className="badge-joined">Became a member</span>
+                    ) : outcome?.status === "alreadyPaying" ? (
+                      <span className="badge-member">Already a member</span>
+                    ) : null}
+                  </span>
+                  <span>{row.email}</span>
+                  <span>{toDisplayDate(row.submitted_at)}</span>
+                </button>
+              );
+            })
           )}
         </div>
 
@@ -315,6 +394,28 @@ export default function WaiverAdmin({ auth }) {
               <p>
                 <strong>Date of Birth:</strong> {selectedWaiver.date_of_birth || "-"}
               </p>
+              <p>
+                <strong>Age:</strong>{" "}
+                {selectedAge === null
+                  ? "-"
+                  : `${selectedAge} (${ageGroup(selectedAge) === "adult" ? "adult" : "kid"})`}
+              </p>
+              {outcomes ? (
+                <p>
+                  <strong>Membership:</strong>{" "}
+                  {selectedOutcome?.status === "joined"
+                    ? `Joined ${new Date(selectedOutcome.joinedAt).toLocaleDateString()} - ${
+                        selectedOutcome.daysToJoin === 0
+                          ? "the day they signed"
+                          : `${selectedOutcome.daysToJoin} day${selectedOutcome.daysToJoin === 1 ? "" : "s"} after signing`
+                      }`
+                    : selectedOutcome?.status === "alreadyPaying"
+                      ? "Already a member - had paid before signing"
+                      : selectedWaiver.archived_at
+                        ? "-"
+                        : "Has not joined"}
+                </p>
+              ) : null}
               <p>
                 <strong>Address:</strong>{" "}
                 {[selectedWaiver.address, selectedWaiver.city, selectedWaiver.state, selectedWaiver.zip]

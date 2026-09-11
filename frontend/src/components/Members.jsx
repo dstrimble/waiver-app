@@ -47,7 +47,11 @@ function MembersPanel({ members }) {
             value: thisMonth?.joined ?? 0,
             note: `${thisMonth?.left ?? 0} left`,
           },
-          { label: "Members all time", value: members.totals.allTimeMembers },
+          {
+            label: "Monthly membership revenue",
+            display: dollars(members.totals.monthlyRevenue),
+            note: "What current members pay a month; annual plans spread over 12",
+          },
         ]}
       />
 

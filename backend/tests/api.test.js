@@ -719,7 +719,14 @@ describe("squarespace members", () => {
 
     const stats = buildMemberStats(orders, opts);
 
-    expect(stats.totals).toEqual({ members: 1, children: 2, allTimeMembers: 1, coaches: 0 });
+    expect(stats.totals).toEqual({
+      members: 1,
+      children: 2,
+      allTimeMembers: 1,
+      coaches: 0,
+      // Pat's $100 plan plus two $25 Add Child plans.
+      monthlyRevenue: 150,
+    });
     const pat = stats.current.find((r) => r.email === "pat@example.com");
     expect(pat.plans).toEqual(["Physical Membership"]);
     expect(pat.addChild).toBe(true);
@@ -747,7 +754,7 @@ describe("squarespace members", () => {
 
     const stats = buildMemberStats(orders, opts);
 
-    expect(stats.totals).toMatchObject({ members: 1, allTimeMembers: 1, coaches: 2 });
+    expect(stats.totals).toMatchObject({ members: 1, allTimeMembers: 1, coaches: 2, monthlyRevenue: 100 });
     expect(stats.current.map((r) => r.email)).toEqual(["pat@example.com"]);
     expect(stats.timeline[stats.timeline.length - 1].members).toBe(1);
   });
@@ -765,6 +772,8 @@ describe("squarespace members", () => {
 
     expect(stats.totals.members).toBe(1);
     expect(stats.current[0]).toMatchObject({ annualAmount: 1100, monthlyAmount: 0 });
+    // A year paid up front counts as a twelfth of it each month.
+    expect(stats.totals.monthlyRevenue).toBe(91.67);
   });
 
   it("reports what members pay after discounts", () => {
@@ -840,10 +849,11 @@ describe("squarespace sales", () => {
 });
 
 describe("waivers to members", () => {
-  const signer = (email, signedAt, followedUp = false) => ({
+  const signer = (email, signedAt, followedUp = false, waiverIds = [email.split("@")[0]]) => ({
     email,
     signed_at: `${signedAt}T15:00:00Z`,
     followed_up: followedUp,
+    waiver_ids: waiverIds,
   });
   const charge = (email, day, product = "Physical Membership") => ({
     id: `${email}-${day}`,
@@ -879,6 +889,22 @@ describe("waivers to members", () => {
     ]);
     expect(stats.followUp.sent).toEqual({ signers: 1, joined: 1, rate: 1 });
     expect(stats.followUp.notSent).toEqual({ signers: 2, joined: 1, rate: 0.5 });
+    // Keyed by waiver id for the waiver list; no one who never joined is marked.
+    expect(stats.byWaiver).toEqual({
+      joined: { status: "joined", joinedAt: "2026-07-15T15:00:00.000Z", daysToJoin: 14 },
+      "paid-first": { status: "joined", joinedAt: "2026-07-10T15:00:00.000Z", daysToJoin: 0 },
+    });
+  });
+
+  it("marks every waiver a family signed under one email", () => {
+    const stats = buildConversionStats(
+      [signer("parent@example.com", "2026-07-01", false, ["11", "12"])],
+      [charge("parent@example.com", "2026-07-05")],
+      opts
+    );
+
+    expect(Object.keys(stats.byWaiver)).toEqual(["11", "12"]);
+    expect(stats.byWaiver["12"].status).toBe("joined");
   });
 
   it("leaves out people who had paid before they signed", () => {
@@ -889,6 +915,7 @@ describe("waivers to members", () => {
     );
 
     expect(stats).toMatchObject({ signers: 0, joined: 0, alreadyPaying: 1 });
+    expect(stats.byWaiver).toEqual({ member: { status: "alreadyPaying" } });
   });
 
   it("does not count a coach starting on the coach discount as converting", () => {
@@ -950,7 +977,14 @@ describe("GET /api/admin/members", () => {
     queryMock.mockReset();
     // The waiver signers matched against members.
     queryMock.mockResolvedValue({
-      rows: [{ email: "pat@example.com", signed_at: new Date(Date.now() - 6 * 86400000), followed_up: true }],
+      rows: [
+        {
+          email: "pat@example.com",
+          signed_at: new Date(Date.now() - 6 * 86400000),
+          followed_up: true,
+          waiver_ids: ["31"],
+        },
+      ],
     });
     process.env.ADMIN_PASSCODE = "changeme";
     process.env.SQUARESPACE_API_KEY = "test-key";
@@ -1044,6 +1078,7 @@ describe("GET /api/admin/members", () => {
     expect(res.status).toBe(200);
     // Pat signed a waiver six days ago and paid five days ago.
     expect(res.body.conversion).toMatchObject({ signers: 1, joined: 1, medianDaysToJoin: 1 });
+    expect(res.body.conversion.byWaiver["31"]).toMatchObject({ status: "joined", daysToJoin: 1 });
     expect(res.body.members).toBeUndefined();
     expect(JSON.stringify(res.body)).not.toContain("pat@example.com");
     // Only email, sign date and follow-up status are read from the waivers.

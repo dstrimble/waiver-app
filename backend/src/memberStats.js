@@ -140,6 +140,10 @@ export function buildMemberStats(orders, { now = Date.now(), timeZone = displayT
       children: current.filter((a) => a.addChild).length,
       allTimeMembers: accounts.filter((a) => a.memberSpans.length).length,
       coaches,
+      // What everyone paying now brings in each month, Add Child included,
+      // with a year paid up front spread across its twelve months.
+      monthlyRevenue:
+        Math.round(current.reduce((n, a) => n + a.monthlyAmount + a.annualAmount / 12, 0) * 100) / 100,
     },
     timeline: buildTimeline(accounts, now, timeZone),
     current,
