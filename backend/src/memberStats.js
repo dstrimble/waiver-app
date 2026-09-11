@@ -14,6 +14,14 @@ const MEMBERSHIP_TYPE = "PAYWALL_PRODUCT";
 // Add-on for a member's child. It is billed as its own plan but is not a
 // membership in its own right, so it is counted separately from members.
 const CHILD_PRODUCT = "Add Child";
+// Coaches train free on a 100%-off discount ("Coach", "Coach 2"). They are
+// staff, not paying members, so their charges are left out of every
+// membership figure.
+const COACH_DISCOUNT = /\bcoach\b/i;
+
+export function isCoachOrder(order) {
+  return (order.discounts || []).some((name) => COACH_DISCOUNT.test(name));
+}
 
 export function displayTimezone() {
   return String(process.env.DISPLAY_TIMEZONE || "").trim() || "America/New_York";
@@ -81,13 +89,17 @@ function spansFor(charges) {
  */
 export function buildMemberStats(orders, { now = Date.now(), timeZone = displayTimezone() } = {}) {
   const byEmail = new Map();
+  const coachCharges = new Map();
   for (const order of orders) {
     // Refunded charges never covered anyone.
     if (order.paymentState !== "PAID" || !order.email) continue;
     const charges = chargesFor(order);
     if (!charges.length) continue;
-    byEmail.set(order.email, [...(byEmail.get(order.email) || []), ...charges]);
+    const target = isCoachOrder(order) ? coachCharges : byEmail;
+    target.set(order.email, [...(target.get(order.email) || []), ...charges]);
   }
+  // Only counted so the page can say how many were left out.
+  const coaches = [...coachCharges.values()].filter((list) => list.some((c) => c.end >= now)).length;
 
   const accounts = [];
   for (const [email, charges] of byEmail) {
@@ -127,6 +139,7 @@ export function buildMemberStats(orders, { now = Date.now(), timeZone = displayT
       members: current.filter((a) => a.plans.length).length,
       children: current.filter((a) => a.addChild).length,
       allTimeMembers: accounts.filter((a) => a.memberSpans.length).length,
+      coaches,
     },
     timeline: buildTimeline(accounts, now, timeZone),
     current,

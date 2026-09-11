@@ -306,6 +306,14 @@ of $500 or more is a year paid up front and covers a year. A member counts
 until their last charge runs out, and someone who comes back later counts as
 joining again. Refunded charges cover nothing.
 
+**Coaches are left out.** Coaches train free on a 100%-off discount ("Coach",
+"Coach 2"). Any membership charge carrying a discount with the word "coach" in
+its name is ignored - it adds nothing to the member count, the chart, the
+member table, or waiver conversion - and the member count's tile says how many
+coaches were left out. Name a new coach discount with "Coach" in it and it is
+excluded automatically. Other discounts ("2 class", "Military") still count:
+those people pay.
+
 **Add Child is counted apart from members.** It is billed as its own plan, but
 it is an add-on to a parent's membership, so it has its own line on the chart
 and its own column in the table, and never adds to the member count.

@@ -1,5 +1,5 @@
 import { pool } from "./db.js";
-import { dayKey, displayTimezone } from "./memberStats.js";
+import { dayKey, displayTimezone, isCoachOrder } from "./memberStats.js";
 
 // Waivers are how trial guests come in, so the question worth answering is how
 // many of them go on to pay. Each waiver is matched to Squarespace by email.
@@ -49,6 +49,8 @@ export function buildConversionStats(signers, orders, { timeZone = displayTimezo
   for (const order of orders) {
     if (order.paymentState !== "PAID" || !order.email) continue;
     if (!order.items.some((item) => item.type === "PAYWALL_PRODUCT")) continue;
+    // A coach starting on the free coach plan has not joined as a member.
+    if (isCoachOrder(order)) continue;
     const list = chargesByEmail.get(order.email) || [];
     list.push(Date.parse(order.createdOn));
     chargesByEmail.set(order.email, list);

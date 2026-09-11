@@ -33,6 +33,8 @@ function toOrder(order) {
     email: String(order.customerEmail || "").trim().toLowerCase(),
     name: [billing.firstName, billing.lastName].filter(Boolean).join(" ").trim(),
     paymentState: order.paymentState,
+    // Discount names, so staff discounts (the coaches') can be told apart.
+    discounts: (order.discountLines || []).map((line) => String(line.name || "")),
     items: (order.lineItems || []).map((item) => {
       const unitPrice = Number(item.unitPricePaid?.value) || 0;
       const quantity = Number(item.quantity) || 1;

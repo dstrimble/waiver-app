@@ -719,7 +719,7 @@ describe("squarespace members", () => {
 
     const stats = buildMemberStats(orders, opts);
 
-    expect(stats.totals).toEqual({ members: 1, children: 2, allTimeMembers: 1 });
+    expect(stats.totals).toEqual({ members: 1, children: 2, allTimeMembers: 1, coaches: 0 });
     const pat = stats.current.find((r) => r.email === "pat@example.com");
     expect(pat.plans).toEqual(["Physical Membership"]);
     expect(pat.addChild).toBe(true);
@@ -728,6 +728,36 @@ describe("squarespace members", () => {
     expect(sam.memberSince).toBeNull();
     const august = stats.timeline[stats.timeline.length - 1];
     expect(august).toMatchObject({ month: "2026-08", members: 1, children: 2, partial: true });
+  });
+
+  it("leaves coaches on the coach discount out of every member count", () => {
+    const orders = [
+      order("2026-08-01", [["Physical Membership", 100]]),
+      order("2026-08-01", [["Physical Membership + Online Academy", 0]], {
+        email: "coach@example.com",
+        name: "Coach Kim",
+        discounts: ["Coach"],
+      }),
+      order("2026-08-03", [["Physical Membership", 0]], {
+        email: "coach2@example.com",
+        name: "Coach Two",
+        discounts: ["Coach 2"],
+      }),
+    ];
+
+    const stats = buildMemberStats(orders, opts);
+
+    expect(stats.totals).toMatchObject({ members: 1, allTimeMembers: 1, coaches: 2 });
+    expect(stats.current.map((r) => r.email)).toEqual(["pat@example.com"]);
+    expect(stats.timeline[stats.timeline.length - 1].members).toBe(1);
+  });
+
+  it("still counts members on other discounts", () => {
+    const discounted = order("2026-08-01", [["Physical Membership", 57.5, "PAYWALL_PRODUCT", 115]], {
+      discounts: ["2 class"],
+    });
+
+    expect(buildMemberStats([discounted], opts).totals).toMatchObject({ members: 1, coaches: 0 });
   });
 
   it("treats a large charge as a year paid up front", () => {
@@ -861,6 +891,14 @@ describe("waivers to members", () => {
     expect(stats).toMatchObject({ signers: 0, joined: 0, alreadyPaying: 1 });
   });
 
+  it("does not count a coach starting on the coach discount as converting", () => {
+    const coach = { ...charge("coach@example.com", "2026-07-03"), discounts: ["Coach"] };
+
+    const stats = buildConversionStats([signer("coach@example.com", "2026-07-01")], [coach], opts);
+
+    expect(stats).toMatchObject({ signers: 1, joined: 0 });
+  });
+
   it("counts a parent paying for Add Child as converting", () => {
     const stats = buildConversionStats(
       [signer("parent@example.com", "2026-07-01")],
@@ -975,6 +1013,27 @@ describe("GET /api/admin/members", () => {
     fetchMock.mockResolvedValueOnce(page([rawOrder("a")]));
     await auth(request(app).get("/api/admin/members?refresh=true"));
     expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("reads discount names so coaches are left out of the members", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce(
+        page([
+          rawOrder("a"),
+          rawOrder("coach", {
+            customerEmail: "coach@example.com",
+            discountTotal: { value: "115.00" },
+            discountLines: [{ name: "Coach", amount: { value: "115.00" } }],
+          }),
+        ])
+      )
+    );
+
+    const res = await auth(request(createApp()).get("/api/admin/members"));
+
+    expect(res.body.members.totals).toMatchObject({ members: 1, coaches: 1 });
+    expect(res.body.members.current.map((r) => r.email)).toEqual(["pat@example.com"]);
   });
 
   it("serves waiver-to-member conversion on its own, without the member list", async () => {
