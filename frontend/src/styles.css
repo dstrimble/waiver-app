@@ -521,6 +521,84 @@ input[type="checkbox"] {
   font-weight: 700;
 }
 
+/* Family waivers: who is training, then a card per person. */
+.who-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.6rem;
+}
+
+.form-hint {
+  margin: 0.6rem 0 0;
+  font-size: 0.86rem;
+  color: var(--muted);
+}
+
+.person-card {
+  margin-top: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #111721;
+  padding: 0.9rem;
+}
+
+.person-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.6rem;
+}
+
+.person-card-head h3 {
+  margin: 0;
+  font-family: "Oswald", Impact, sans-serif;
+  font-size: 1.1rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #f2f5fa;
+}
+
+.person-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.person-interests {
+  margin-top: 0.8rem;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.person-sub {
+  font-size: 0.92rem;
+  color: var(--muted);
+}
+
+.add-person {
+  margin-top: 0.8rem;
+  width: 100%;
+  border: 1px dashed #5b6676;
+  border-radius: 12px;
+  background: transparent;
+  color: #e7edf7;
+  padding: 0.7rem;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.add-person:hover {
+  border-color: #d95a69;
+}
+
+@media (max-width: 560px) {
+  .person-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 840px) {
   .admin-shell {
     padding: 1rem;
@@ -985,7 +1063,8 @@ input[type="checkbox"] {
 
 .waiver-row .badge-age,
 .waiver-row .badge-joined,
-.waiver-row .badge-member {
+.waiver-row .badge-member,
+.waiver-row .badge-family {
   padding: 0.05rem 0.5rem;
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -1010,7 +1089,8 @@ input[type="checkbox"] {
   background: rgba(57, 135, 229, 0.3);
 }
 
-.waiver-row .badge-member {
+.waiver-row .badge-member,
+.waiver-row .badge-family {
   color: var(--muted);
 }
 

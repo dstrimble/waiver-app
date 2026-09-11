@@ -53,6 +53,10 @@ services:
       # OAuth client ID for "Sign in with Google" on the admin page. Unset, only
       # the passcode is offered.
       GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:-}"
+      # MatTracker account setup for new waivers. Off unless both are set, so a
+      # local run never creates accounts in the real MatTracker.
+      SPARTRACKER_WAIVER_URL: "${SPARTRACKER_WAIVER_URL:-}"
+      SPARTRACKER_WAIVER_TOKEN: "${SPARTRACKER_WAIVER_TOKEN:-}"
     depends_on:
       db:
         condition: service_healthy

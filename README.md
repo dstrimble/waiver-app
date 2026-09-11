@@ -19,6 +19,7 @@ A standalone waiver submission app with e-signature support.
 - Submission persisted to PostgreSQL
 - Signed waiver emailed as a PDF to the gym and to the person who signed
 - Follow-up instructions for signing up and managing an account
+- Family waivers: one parent signs once for several children, and themselves
 - Automatic "how was your trial week?" email a week after signing
 - Admin dashboard: signup trends, interest mix, referral sources, age bands
 - Admin can send the trial follow-up early, or archive a waiver
@@ -219,6 +220,72 @@ down for a while - a month-late "how was your trial week?" helps nobody.
 Sending reuses the same SMTP settings and links as the confirmation email; with
 SMTP unset the sweep logs a warning and does nothing. Docker Compose ships with
 `FOLLOWUP_ENABLED=false` so a local database of old waivers cannot mail anyone.
+
+## Family Waivers
+
+One waiver can cover a parent and their children. The form starts with
+**Who's training?** - *Just me*, *My kids*, or *Me and my kids* - then takes the
+signer's contact details once, and a card per person: **You** (if the signer
+trains) and **Child 1, 2, ...** with "+ Add another child". Each card has a date
+of birth and that person's own classes; children start with Kids Classes
+ticked. One signature covers everyone.
+
+Behind it, every person gets their own row, so the waiver list, the charts and
+conversion stay per person. The rows share a `submission_id`, the contact
+details and the signature, and are stored with a single `INSERT`, so a family is
+saved whole or not at all. A child's row has the parent in `parent_name`.
+
+- **One PDF** lists everyone, with "Signed by ... as parent or legal guardian
+  of ..." under the signature.
+- **One email each** to the gym and the parent, not one per child.
+- **One follow-up** per family, greeting the parent.
+- **One MatTracker call** with the parent as signer and everyone as participants.
+- In the admin waiver list, a family's waivers show **Family of N**, and the
+  detail panel says who signed and who else was on the same waiver.
+
+The form refuses someone under 18 signing for themselves, and anyone 18 or over
+listed as a child - they sign their own. The backend checks both too, allows at
+most 10 people per waiver, and still accepts the older one-person form from a
+page loaded before this shipped.
+
+## MatTracker Accounts
+
+Each new waiver sets up MatTracker (spartracker) accounts for the people it
+covers, so a member's account is waiting the first time they sign in there with
+Google on the same email. The backend calls
+`POST /api/waiver-signed` with:
+
+- **signer** - whoever signed: the parent when the form has a parent's name,
+  otherwise the person themselves, with the waiver's email.
+- **participants** - everyone the waiver covers: each child, plus the parent if
+  they train (see Family Waivers).
+- **waiver_id** - `waiver_<submission id>` (`waiver_<id>` for waivers from
+  before family waivers), which MatTracker keys on, so a repeat of the same
+  waiver changes nothing.
+
+The call goes out right after the waiver is stored and never fails a signing.
+Its outcome is written to the row (`mattracker_synced_at`, `mattracker_error`),
+a sweep retries failures every `SPARTRACKER_RETRY_MINUTES` (default 30) for 24
+tries - about half a day - and the waiver's detail panel shows the status with a
+**Send to MatTracker** button that sends it again by hand. Only waivers signed
+after this shipped are sent; older ones show "Not sent - signed before MatTracker
+sync", and the button still works for them.
+
+| Variable | Purpose |
+| --- | --- |
+| `SPARTRACKER_WAIVER_URL` | The endpoint, under `email:` in the Helm values |
+| `SPARTRACKER_WAIVER_TOKEN` | Bearer token MatTracker issued for this app only - in `app-secrets` |
+| `SPARTRACKER_RETRY_MINUTES` | How often failures are retried (default `30`) |
+
+With either of the first two unset nothing is sent, and waivers signed meanwhile
+go out once both are present. Docker Compose leaves them unset, so a local run
+never creates real accounts. To add the token to the cluster:
+
+```bash
+kubectl -n gravitas patch secret app-secrets \
+  -p '{"stringData":{"SPARTRACKER_WAIVER_TOKEN":"<token>"}}'
+kubectl -n gravitas rollout restart deploy/backend
+```
 
 ## Admin Dashboard
 

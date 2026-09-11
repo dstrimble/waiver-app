@@ -71,6 +71,16 @@ spec:
                   name: {{ .Values.secret.name }}
                   key: SQUARESPACE_API_KEY
                   optional: true
+            {{- /*
+              Bearer token for MatTracker's /api/waiver-signed. Optional: without
+              it new waivers wait unsent, and go out once it is added.
+            */}}
+            - name: SPARTRACKER_WAIVER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secret.name }}
+                  key: SPARTRACKER_WAIVER_TOKEN
+                  optional: true
             {{- range $key, $value := .Values.email }}
             {{- if $value }}
             - name: {{ $key }}

@@ -5,6 +5,7 @@ import {
   adminGetStats,
   adminGetWaivers,
   adminSendFollowUp,
+  adminSendToMatTracker,
 } from "../api.js";
 import {
   CategoryColumns,
@@ -155,6 +156,23 @@ export default function WaiverAdmin({ auth }) {
     }
   }
 
+  // MatTracker treats a repeat as a no-op, so sending again is always safe.
+  async function sendToMatTracker(row) {
+    setRowBusy(`mattracker-${row.id}`);
+    setRowError("");
+    setRowNotice(null);
+    try {
+      await adminSendToMatTracker(auth, row.id);
+      setRowNotice({ text: `${row.name} is set up in MatTracker.` });
+      await loadWaivers(dateRange.start, dateRange.end);
+    } catch (err) {
+      setRowError(err.message || "Could not send to MatTracker.");
+      await loadWaivers(dateRange.start, dateRange.end);
+    } finally {
+      setRowBusy("");
+    }
+  }
+
   // Archiving is reversible, so it needs no confirmation dialog - it offers an
   // undo instead, and the record itself is never destroyed.
   async function setArchived(row, archived) {
@@ -202,6 +220,17 @@ export default function WaiverAdmin({ auth }) {
     if (listFilter === "joined") return outcomes?.[row.id]?.status === "joined";
     return ageGroup(ageFrom(row.date_of_birth)) === listFilter;
   });
+  // Waivers a parent signed together, by submission.
+  const familySizes = useMemo(() => {
+    const sizes = {};
+    for (const row of waivers) {
+      if (row.submission_id) sizes[row.submission_id] = (sizes[row.submission_id] || 0) + 1;
+    }
+    return sizes;
+  }, [waivers]);
+  const siblings = selectedWaiver?.submission_id
+    ? waivers.filter((row) => row.submission_id === selectedWaiver.submission_id && row.id !== selectedWaiver.id)
+    : [];
   const selectedAge = selectedWaiver ? ageFrom(selectedWaiver.date_of_birth) : null;
   const selectedOutcome = selectedWaiver ? outcomes?.[selectedWaiver.id] : null;
 
@@ -358,6 +387,9 @@ export default function WaiverAdmin({ auth }) {
                         {group === "adult" ? "Adult" : "Kid"} · {age}
                       </span>
                     ) : null}
+                    {familySizes[row.submission_id] > 1 ? (
+                      <span className="badge-family">Family of {familySizes[row.submission_id]}</span>
+                    ) : null}
                     {outcome?.status === "joined" ? (
                       <span className="badge-joined">Became a member</span>
                     ) : outcome?.status === "alreadyPaying" ? (
@@ -385,6 +417,17 @@ export default function WaiverAdmin({ auth }) {
               <p>
                 <strong>Email:</strong> {selectedWaiver.email || "-"}
               </p>
+              <p>
+                <strong>Signed by:</strong>{" "}
+                {selectedWaiver.parent_name
+                  ? `${selectedWaiver.parent_name} (parent / guardian)`
+                  : `${selectedWaiver.name} (themselves)`}
+              </p>
+              {siblings.length ? (
+                <p>
+                  <strong>Same waiver:</strong> {siblings.map((row) => row.name).join(", ")}
+                </p>
+              ) : null}
               <p>
                 <strong>Interests:</strong>{" "}
                 {Array.isArray(selectedWaiver.interests) && selectedWaiver.interests.length
@@ -452,6 +495,16 @@ export default function WaiverAdmin({ auth }) {
                       ? `Not sent - ${selectedWaiver.followup_error}`
                       : "Not sent yet"}
               </p>
+              <p>
+                <strong>MatTracker:</strong>{" "}
+                {selectedWaiver.mattracker_synced_at
+                  ? `Account set up ${toDisplayDate(selectedWaiver.mattracker_synced_at)}`
+                  : selectedWaiver.mattracker_error
+                    ? `Not set up - ${selectedWaiver.mattracker_error}`
+                    : selectedWaiver.mattracker_eligible === false
+                      ? "Not sent - signed before MatTracker sync"
+                      : "Pending"}
+              </p>
 
               <div className="waiver-actions">
                 <button
@@ -474,6 +527,23 @@ export default function WaiverAdmin({ auth }) {
                     : selectedWaiver.followup_sent_at
                       ? "Follow-up already sent"
                       : "Send follow-up now"}
+                </button>
+                <button
+                  type="button"
+                  className="viz-toggle"
+                  disabled={
+                    rowBusy === `mattracker-${selectedWaiver.id}` ||
+                    Boolean(selectedWaiver.archived_at) ||
+                    !selectedWaiver.email
+                  }
+                  onClick={() => sendToMatTracker(selectedWaiver)}
+                  title="Set up this person's MatTracker account now. Safe to repeat."
+                >
+                  {rowBusy === `mattracker-${selectedWaiver.id}`
+                    ? "Sending..."
+                    : selectedWaiver.mattracker_synced_at
+                      ? "Send to MatTracker again"
+                      : "Send to MatTracker"}
                 </button>
                 {selectedWaiver.archived_at ? (
                   <button

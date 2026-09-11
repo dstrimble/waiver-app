@@ -72,6 +72,36 @@ ALTER TABLE waiver_submissions
 ALTER TABLE waiver_submissions
   ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
 
+-- A parent signing for several children (and perhaps themselves) stores one
+-- row per person under one submission id. Older waivers have none: each was
+-- its own submission.
+ALTER TABLE waiver_submissions
+  ADD COLUMN IF NOT EXISTS submission_id UUID;
+CREATE INDEX IF NOT EXISTS idx_waiver_submission_id
+  ON waiver_submissions (submission_id)
+  WHERE submission_id IS NOT NULL;
+
+-- MatTracker account setup for the person each waiver covers: when it went
+-- through, the last failure, and how many tries it has had.
+ALTER TABLE waiver_submissions
+  ADD COLUMN IF NOT EXISTS mattracker_synced_at TIMESTAMPTZ;
+ALTER TABLE waiver_submissions
+  ADD COLUMN IF NOT EXISTS mattracker_error     TEXT;
+ALTER TABLE waiver_submissions
+  ADD COLUMN IF NOT EXISTS mattracker_attempts  INT NOT NULL DEFAULT 0;
+
+-- Only waivers signed from the moment this shipped are sent, by the same
+-- two-step as followup_eligible above: existing rows back-fill as false, then
+-- the default flips to true for every waiver signed afterwards.
+ALTER TABLE waiver_submissions
+  ADD COLUMN IF NOT EXISTS mattracker_eligible BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE waiver_submissions
+  ALTER COLUMN mattracker_eligible SET DEFAULT true;
+
+CREATE INDEX IF NOT EXISTS idx_waiver_mattracker_queue
+  ON waiver_submissions (submitted_at)
+  WHERE mattracker_synced_at IS NULL AND mattracker_eligible AND archived_at IS NULL;
+
 CREATE INDEX IF NOT EXISTS idx_waiver_submitted_at
   ON waiver_submissions (submitted_at DESC);
 
