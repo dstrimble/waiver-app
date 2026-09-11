@@ -941,6 +941,79 @@ input[type="checkbox"] {
   max-height: 480px;
 }
 
+/* Waiver list: kid/adult and membership at a glance. Members joined are blue,
+   in the same --viz-1 the charts use. */
+.waiver-list-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  margin-top: 0.8rem;
+}
+
+.waiver-legend {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.waiver-legend-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: rgba(57, 135, 229, 0.35);
+  border: 1px solid var(--viz-1);
+}
+
+.waiver-row.is-converted {
+  border-color: rgba(57, 135, 229, 0.75);
+  background: linear-gradient(90deg, rgba(57, 135, 229, 0.22) 0%, rgba(57, 135, 229, 0.08) 100%), var(--paper-soft);
+}
+
+.waiver-row.is-converted.is-selected {
+  border-color: #d64a59;
+}
+
+.waiver-row .waiver-row-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.waiver-row .badge-age,
+.waiver-row .badge-joined,
+.waiver-row .badge-member {
+  padding: 0.05rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.waiver-row .badge-age.is-adult {
+  color: var(--ink);
+}
+
+.waiver-row .badge-age.is-kid {
+  color: #ffc56b;
+  border-color: rgba(201, 133, 0, 0.7);
+  background: rgba(201, 133, 0, 0.14);
+}
+
+.waiver-row .badge-joined {
+  color: #cde2fb;
+  border-color: var(--viz-1);
+  background: rgba(57, 135, 229, 0.3);
+}
+
+.waiver-row .badge-member {
+  color: var(--muted);
+}
+
 /* Admin section tabs, and the home page's links to each section. */
 .admin-live-head {
   flex-wrap: wrap;

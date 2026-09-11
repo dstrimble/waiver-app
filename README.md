@@ -247,6 +247,14 @@ The waiver page (`/admin/waiver`) shows a set of charts above the waiver list:
   before signing is left out as an existing or past member. Only these counts
   reach the waiver page - never the member list.
 
+In the waiver list, each waiver is tagged **Kid** or **Adult** with its age
+today, from the date of birth - anyone older than 13 is an adult. With
+Squarespace connected, waivers whose signer went on to pay are **blue** with a
+"Became a member" tag (every waiver a family signed under the same email is
+marked), existing members are tagged "Already a member", and the detail panel
+says when they joined. A filter above the list shows all waivers, adults, kids,
+or just the ones that became members.
+
 Every chart has a "Show data" toggle that swaps it for the underlying table, so
 nothing is locked behind colour or hover.
 
