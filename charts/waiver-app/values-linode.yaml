@@ -32,6 +32,9 @@ email:
   FOLLOWUP_GRACE_DAYS: "3"
   FOLLOWUP_POLL_MINUTES: "60"
   DISPLAY_TIMEZONE: "America/Chicago"
+  # "Sign in with Google" on the admin page. A client ID is public by design;
+  # the client secret is never used.
+  GOOGLE_CLIENT_ID: "768385890439-812k6cqllqefp7vknhraeso249mnci4k.apps.googleusercontent.com"
 
 postgres:
   persistence:

@@ -45,6 +45,12 @@ spec:
                   name: app-secrets
                   key: SMTP_PASSWORD
                   optional: true
+            - name: SQUARESPACE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: SQUARESPACE_API_KEY
+                  optional: true
             - name: SMTP_HOST
               value: "smtp.gmail.com"
             - name: SMTP_PORT

@@ -11,6 +11,8 @@ secret:
   # Gmail app password used to send waiver confirmation emails.
   # This is an app password, not the account password.
   smtpPassword: ""
+  # Read-only Squarespace API key (Orders) for the admin members section.
+  squarespaceApiKey: ""
 
 # Non-secret waiver-email settings, passed straight through as backend env vars.
 # Blank values are omitted, and the email leaves out the matching section.
@@ -44,6 +46,9 @@ email:
   FOLLOWUP_POLL_MINUTES: "60"
   # Timezone used for timestamps printed on the PDF.
   DISPLAY_TIMEZONE: "America/New_York"
+  # OAuth client ID for "Sign in with Google" on the admin page (not secret).
+  # Empty hides the button; the passcode keeps working either way.
+  GOOGLE_CLIENT_ID: ""
 
 postgres:
   enabled: true
@@ -158,7 +163,7 @@ ingress:
   annotations: {}
   paths:
     - /waiver
-    - /waiver/admin
+    - /admin
     - /
   tls:
     enabled: false

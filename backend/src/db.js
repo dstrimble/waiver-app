@@ -87,6 +87,29 @@ CREATE TABLE IF NOT EXISTS admin_auth (
   password_hash TEXT        NOT NULL,
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Google accounts that have signed in to the admin page. Each starts pending
+-- and sees nothing until an existing admin approves it; deleting the row
+-- denies or revokes access.
+CREATE TABLE IF NOT EXISTS admin_users (
+  id           BIGSERIAL PRIMARY KEY,
+  google_sub   TEXT        NOT NULL UNIQUE,
+  email        TEXT        NOT NULL,
+  name         TEXT        NOT NULL DEFAULT '',
+  status       TEXT        NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved')),
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  approved_at  TIMESTAMPTZ,
+  approved_by  TEXT
+);
+
+-- Sign-in sessions for approved Google admins, stored as token hashes.
+CREATE TABLE IF NOT EXISTS admin_sessions (
+  token_hash TEXT        PRIMARY KEY,
+  user_id    BIGINT      NOT NULL REFERENCES admin_users (id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at TIMESTAMPTZ NOT NULL
+);
 `;
 
 async function seedAdminAuth() {

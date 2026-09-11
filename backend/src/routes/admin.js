@@ -3,6 +3,19 @@ import { pool } from "../db.js";
 import { hashPasscode, verifyPasscode } from "../adminPasscode.js";
 import { sendFollowUpNow } from "../followUpEmails.js";
 import { getWaiverStats } from "../waiverStats.js";
+import { getSquarespaceStats } from "../squarespaceStats.js";
+import {
+  approveAdminUser,
+  createSession,
+  deleteSession,
+  findSessionUser,
+  getGoogleClientId,
+  listAdminUsers,
+  notifyAccessRequest,
+  removeAdminUser,
+  upsertGoogleUser,
+  verifyGoogleCredential,
+} from "../adminUsers.js";
 
 export const adminRouter = Router();
 
@@ -28,8 +41,25 @@ async function isAuthorizedPasscode(passcode) {
   return verifyPasscode(provided, row.password_hash);
 }
 
+function bearerToken(req) {
+  const match = String(req.headers.authorization || "").match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : "";
+}
+
+// Admin routes accept either a Google session (Authorization: Bearer) or the
+// passcode header. A Google admin is attached as req.adminUser.
 async function requireAdmin(req, res, next) {
   try {
+    const token = bearerToken(req);
+    if (token) {
+      const user = await findSessionUser(token);
+      if (!user) {
+        return res.status(401).json({ error: "Your admin session has ended. Sign in again." });
+      }
+      req.adminUser = user;
+      return next();
+    }
+
     const provided = String(req.headers["x-admin-passcode"] || "").trim();
     const ok = await isAuthorizedPasscode(provided);
     if (!ok) {
@@ -44,6 +74,68 @@ async function requireAdmin(req, res, next) {
 
 adminRouter.post("/verify", requireAdmin, (_req, res) => {
   return res.json({ ok: true });
+});
+
+/** Public: which Google client the sign-in button should use, if any. */
+adminRouter.get("/auth/config", (_req, res) => {
+  return res.json({ googleClientId: getGoogleClientId() || null });
+});
+
+/**
+ * Public: exchange a Google ID token for an admin session. Accounts that are
+ * not yet approved get no session - just confirmation that their request is
+ * on file - and the gym is emailed the first time one asks.
+ */
+adminRouter.post("/auth/google", async (req, res) => {
+  if (!getGoogleClientId()) {
+    return res.status(503).json({ error: "Google sign-in is not set up." });
+  }
+
+  let identity;
+  try {
+    identity = await verifyGoogleCredential(req.body?.credential);
+  } catch (err) {
+    console.warn("Google sign-in rejected:", err.message);
+    return res.status(401).json({ error: "Google sign-in could not be verified. Try again." });
+  }
+
+  try {
+    const user = await upsertGoogleUser(identity);
+    if (user.status === "approved") {
+      const token = await createSession(user.id);
+      return res.json({
+        status: "approved",
+        token,
+        user: { id: user.id, email: user.email, name: user.name },
+      });
+    }
+
+    if (user.created) {
+      notifyAccessRequest(user).catch((err) =>
+        console.error(`Could not email the access request from ${user.email}:`, err)
+      );
+    }
+    return res.json({ status: "pending", email: user.email });
+  } catch (err) {
+    console.error("Google sign-in failed:", err);
+    return res.status(500).json({ error: "Could not sign in." });
+  }
+});
+
+/** Who is signed in - used to pick a stored Google session back up. */
+adminRouter.get("/auth/me", requireAdmin, (req, res) => {
+  return res.json({ user: req.adminUser || null });
+});
+
+adminRouter.post("/auth/logout", requireAdmin, async (req, res) => {
+  try {
+    const token = bearerToken(req);
+    if (token) await deleteSession(token);
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("Failed to end admin session:", err);
+    return res.status(500).json({ error: "Could not sign out." });
+  }
 });
 
 adminRouter.post("/change-passcode", requireAdmin, async (req, res) => {
@@ -224,5 +316,61 @@ adminRouter.get("/stats", requireAdmin, async (_req, res) => {
   } catch (err) {
     console.error("Failed to build waiver stats:", err);
     return res.status(500).json({ error: "Could not load stats." });
+  }
+});
+
+/**
+ * Members and sales, worked out from Squarespace orders. Cached for half an
+ * hour; ?refresh=true pulls a fresh copy.
+ */
+adminRouter.get("/squarespace", requireAdmin, async (req, res) => {
+  try {
+    return res.json(await getSquarespaceStats({ refresh: req.query.refresh === "true" }));
+  } catch (err) {
+    console.error("Failed to load Squarespace data:", err);
+    return res.status(502).json({ error: "Could not load data from Squarespace." });
+  }
+});
+
+/** Google accounts that have asked for access, pending first. */
+adminRouter.get("/users", requireAdmin, async (_req, res) => {
+  try {
+    return res.json(await listAdminUsers());
+  } catch (err) {
+    console.error("Failed to list admin users:", err);
+    return res.status(500).json({ error: "Could not load admin access." });
+  }
+});
+
+adminRouter.post("/users/:id/approve", requireAdmin, async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid user id." });
+
+  try {
+    const approvedBy = req.adminUser?.email || "passcode";
+    const user = await approveAdminUser(id, approvedBy);
+    if (!user) return res.status(404).json({ error: "That request is no longer there." });
+    return res.json({ ok: true, user });
+  } catch (err) {
+    console.error(`Failed to approve admin user ${id}:`, err);
+    return res.status(500).json({ error: "Could not approve access." });
+  }
+});
+
+/** Deny a pending request or remove an admin. */
+adminRouter.delete("/users/:id", requireAdmin, async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid user id." });
+  if (req.adminUser && String(req.adminUser.id) === String(id)) {
+    return res.status(400).json({ error: "You can't remove your own access." });
+  }
+
+  try {
+    const user = await removeAdminUser(id);
+    if (!user) return res.status(404).json({ error: "That account is no longer there." });
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error(`Failed to remove admin user ${id}:`, err);
+    return res.status(500).json({ error: "Could not remove access." });
   }
 });

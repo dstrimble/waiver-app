@@ -22,6 +22,8 @@ A standalone waiver submission app with e-signature support.
 - Automatic "how was your trial week?" email a week after signing
 - Admin dashboard: signup trends, interest mix, referral sources, age bands
 - Admin can send the trial follow-up early, or archive a waiver
+- Admin members and sales from Squarespace: members over time, current
+  members, and monthly sales split into memberships, retail and events
 - Admin listing endpoint secured by passcode header
 
 ## Run Locally With Docker
@@ -55,8 +57,50 @@ npm run dev
 - `POST /api/admin/waivers/:id/followup` - send the trial follow-up now
 - `POST /api/admin/waivers/:id/archive` - hide a waiver, keeping the record
 - `POST /api/admin/waivers/:id/restore` - bring an archived waiver back
+- `GET /api/admin/squarespace` - members and sales from Squarespace
+  (`?refresh=true` skips the half-hour cache)
 
-All `/api/admin/*` routes require the `x-admin-passcode` header.
+- `GET /api/admin/auth/config` - which Google client the sign-in button uses
+- `POST /api/admin/auth/google` - trade a Google ID token for a session, or
+  file an access request
+- `GET /api/admin/users` - Google accounts with access or waiting for it
+- `POST /api/admin/users/:id/approve` / `DELETE /api/admin/users/:id` - approve,
+  deny, or remove
+
+Apart from the two `auth/config` and `auth/google` routes, every `/api/admin/*`
+route needs either the `x-admin-passcode` header or a Google session token as
+`Authorization: Bearer <token>`.
+
+## Admin Sign-In
+
+The admin page lives at `/admin` (the old `/waiver/admin` redirects there). It
+offers **Sign in with Google** above the passcode.
+
+Anyone can sign in with Google, but a new account only files a request: it sees
+nothing until an existing admin approves it, and the gym inbox
+(`WAIVER_NOTIFY_EMAIL`) is emailed when a request comes in. Admins approve,
+deny, and remove people under **Admin access** at the top of the page. Removing
+someone ends their sessions immediately; they can ask again, and it takes a
+fresh approval. Nobody can remove themselves, so there is always someone left.
+
+An approved Google admin stays signed in for 30 days on that browser. The
+passcode keeps working as before - it is how the first Google account gets
+approved, and the way back in if Google sign-in is ever unavailable.
+
+### Setup
+
+1. In the Google Cloud console, create an **OAuth client ID** of type **Web
+   application**.
+2. Under **Authorized JavaScript origins** add the site's origin, e.g.
+   `https://gravitas.trimblebarra.com`, plus `http://localhost`,
+   `http://localhost:8090` and `http://localhost:5173` for local work. There is
+   no redirect URI - the button hands the page a signed token and the backend
+   verifies it.
+3. Set the OAuth consent screen to **External** and publish it; only the basic
+   name and email scopes are used, so no review is needed. Left in testing, only
+   listed test users can sign in.
+4. Put the client ID in `GOOGLE_CLIENT_ID` - under `email:` in the Helm values.
+   It is not a secret; the client secret is never used.
 
 ## Waiver Confirmation Emails
 
@@ -220,6 +264,60 @@ hood it is a single `archived_at` timestamp; restoring clears it.
 If you ever need a genuine erasure - someone asking for their data to be removed
 outright - that is a deliberate database operation, not something the admin page
 can do by accident.
+
+## Members and Sales (Squarespace)
+
+With `SQUARESPACE_API_KEY` set, the admin page adds a members and sales section
+below the waiver charts, read from the Squarespace Orders API:
+
+- **Tiles** - current members, children added, joined and left this month, and
+  members all time; then sales this month and over the last 12 months, split by
+  category.
+- **Members over time** - members and children added at the end of each month.
+- **Current members** - everyone paying now, with their plan, whether they pay
+  for Add Child, when they joined, what they pay, and their last charge.
+- **Sales by month** - stacked columns of memberships, retail and events.
+
+### How membership is worked out
+
+Squarespace has no "is a member" flag - Member Areas plans show up as orders,
+one when someone joins and one per renewal. So each paid charge is taken to
+cover its plan for a month, plus a week's grace for a late renewal; a charge
+of $500 or more is a year paid up front and covers a year. A member counts
+until their last charge runs out, and someone who comes back later counts as
+joining again. Refunded charges cover nothing.
+
+**Add Child is counted apart from members.** It is billed as its own plan, but
+it is an add-on to a parent's membership, so it has its own line on the chart
+and its own column in the table, and never adds to the member count.
+
+### How sales are worked out
+
+Sales are what was paid after discounts, before tax and shipping; refunded
+orders are left out. Squarespace only records discounts against a whole order,
+so a discount is spread across the order's lines by size. Categories:
+
+- **Memberships** - Member Areas plans, including Add Child.
+- **Events** - rank reviews and seminars (products named "Rank Review" or
+  "Seminar"). Name a new event product that way and it is counted as one.
+- **Retail** - everything else, including the gear pre-orders that were set up
+  as services.
+
+### Setup
+
+API keys need the Squarespace **Commerce Advanced** plan. In Squarespace, go to
+Settings > Developer API Keys, generate a key, and give it **Orders: Read Only**
+- nothing else is used. Then add it to the cluster secret:
+
+```bash
+kubectl -n gravitas patch secret app-secrets \
+  -p '{"stringData":{"SQUARESPACE_API_KEY":"<key>"}}'
+kubectl -n gravitas rollout restart deploy/backend
+```
+
+Without the key the section says Squarespace is not connected and everything
+else works as before. Fetching every order takes a few seconds, so the result is
+cached in the backend for half an hour; **Refresh** fetches a new copy.
 
 ## Waiver Text
 
