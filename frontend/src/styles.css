@@ -1094,6 +1094,162 @@ input[type="checkbox"] {
   color: var(--muted);
 }
 
+/* ---------------------------------------------------------------- */
+/* Portrait phones: every admin table becomes one card per row, with */
+/* each value captioned by its column, so nothing needs sideways     */
+/* scrolling to read.                                                */
+/* ---------------------------------------------------------------- */
+@media (max-width: 600px) {
+  /* A grid item is as wide as its content unless told otherwise, which is how
+     a wide table used to stretch the whole page past the screen. */
+  .viz-dashboard > *,
+  .viz-two-up > *,
+  .admin-grid > * {
+    min-width: 0;
+  }
+
+  .viz-table-wrap {
+    max-height: none;
+    overflow-x: visible;
+  }
+
+  /* Every member as a card makes a very long page, so this one keeps its own
+     scroll, as it has on a desktop. */
+  .members-table-wrap {
+    max-height: 65vh;
+    overflow-y: auto;
+  }
+
+  /* Hidden from view, still read out by a screen reader. */
+  .viz-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+  }
+
+  .viz-table,
+  .viz-table tbody,
+  .viz-table tr,
+  .viz-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .viz-table tr {
+    margin-bottom: 0.55rem;
+    padding: 0.6rem 0.7rem;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #141a23;
+  }
+
+  .viz-table tr:last-child {
+    margin-bottom: 0;
+  }
+
+  .viz-table td {
+    display: grid;
+    grid-template-columns: minmax(0, 6.5rem) minmax(0, 1fr);
+    gap: 0.75rem;
+    align-items: baseline;
+    padding: 0.18rem 0;
+    border: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .viz-table td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-weight: 600;
+  }
+
+  /* The first cell names the row, so it reads as the card's heading. */
+  .viz-table td:first-child {
+    grid-template-columns: minmax(0, 1fr);
+    margin-bottom: 0.2rem;
+    font-size: 0.95rem;
+    font-weight: 700;
+  }
+
+  .viz-table td:first-child::before {
+    content: none;
+  }
+
+  .viz-card {
+    padding: 0.85rem 0.8rem 1rem;
+  }
+
+  .viz-tiles {
+    grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+    gap: 0.5rem;
+  }
+
+  .viz-tile {
+    padding: 0.7rem 0.8rem;
+  }
+
+  .viz-tile-value {
+    font-size: 1.5rem;
+  }
+
+  .viz-segmented {
+    flex-wrap: wrap;
+  }
+
+  .viz-range {
+    justify-content: flex-start;
+  }
+
+  .admin-shell {
+    padding: 0.85rem 0.8rem;
+  }
+
+  .admin-live-head {
+    align-items: flex-start;
+  }
+
+  .admin-nav {
+    width: 100%;
+  }
+
+  .admin-nav-link {
+    flex: 1 1 auto;
+    text-align: center;
+  }
+
+  .admin-live-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .squarespace-head .viz-toggle {
+    margin-left: 0;
+  }
+
+  /* The list is already the whole width here, so let the page scroll it. */
+  .waiver-list {
+    max-height: none;
+  }
+
+  .waiver-detail,
+  .admin-access {
+    padding: 0.75rem;
+  }
+
+  .waiver-detail h3 {
+    font-size: 1.35rem;
+  }
+
+  .admin-user-list li {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+}
+
 /* Admin section tabs, and the home page's links to each section. */
 .admin-live-head {
   flex-wrap: wrap;

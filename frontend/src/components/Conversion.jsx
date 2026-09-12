@@ -2,23 +2,28 @@ import { StatTiles, monthLabel } from "./Charts.jsx";
 
 const percent = (rate) => `${Math.round(rate * 100)}%`;
 
+const CONVERSION_COLUMNS = ["", "Signed", "Joined", "Rate"];
+
 function ConversionTable({ rows }) {
   return (
-    <table className="viz-table">
-      <thead>
-        <tr>
-          {["", "Signed", "Joined", "Rate"].map((c) => (
-            <th key={c} scope="col">{c}</th>
+    <table className="viz-table" role="table">
+      <thead role="rowgroup">
+        <tr role="row">
+          {CONVERSION_COLUMNS.map((c) => (
+            <th key={c} scope="col" role="columnheader">{c}</th>
           ))}
         </tr>
       </thead>
-      <tbody>
+      <tbody role="rowgroup">
         {rows.map((row) => (
-          <tr key={row.label}>
-            <td>{row.label}</td>
-            <td>{row.signers}</td>
-            <td>{row.joined}</td>
-            <td>{row.signers ? percent(row.rate) : "-"}</td>
+          <tr key={row.label} role="row">
+            {[row.label, row.signers, row.joined, row.signers ? percent(row.rate) : "-"].map(
+              (value, index) => (
+                <td key={CONVERSION_COLUMNS[index]} role="cell" data-label={CONVERSION_COLUMNS[index]}>
+                  {value}
+                </td>
+              )
+            )}
           </tr>
         ))}
       </tbody>

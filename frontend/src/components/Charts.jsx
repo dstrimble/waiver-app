@@ -62,13 +62,25 @@ function niceTicks(max, count = 4) {
   return Array.from({ length: steps + 1 }, (_, i) => Math.round(i * step * 100) / 100);
 }
 
-/** Thin x-axis labels to about six, so they never collide. */
+/** How many x-axis labels fit before they collide - a phone holds far fewer. */
+function labelBudget(width) {
+  return width && width < 420 ? 3 : 6;
+}
+
+/** Thin x-axis labels to the budget, so they never collide. */
 function labelIndices(n, maxLabels = 6) {
   const set = new Set();
   if (n === 0) return set;
   const stride = n <= maxLabels ? 1 : Math.ceil(n / maxLabels);
   for (let i = 0; i < n; i += stride) set.add(i);
-  set.add(n - 1);
+
+  // The closing point is always labelled - it is the one being read - so drop
+  // the label before it when the two would sit on top of each other.
+  const last = n - 1;
+  for (const i of [...set]) {
+    if (i !== last && last - i < stride * 0.6) set.delete(i);
+  }
+  set.add(last);
   return set;
 }
 
@@ -154,21 +166,24 @@ function ChartFrame({ title, subtitle, actions, table, children }) {
   );
 }
 
+// On a phone each row becomes a card, so every cell carries its column name for
+// the caption CSS draws beside it, and the roles are spelled out because the
+// card layout drops the ones the table markup would have given.
 function SimpleTable({ columns, rows }) {
   return (
-    <table className="viz-table">
-      <thead>
-        <tr>
+    <table className="viz-table" role="table">
+      <thead role="rowgroup">
+        <tr role="row">
           {columns.map((c) => (
-            <th key={c} scope="col">{c}</th>
+            <th key={c} scope="col" role="columnheader">{c}</th>
           ))}
         </tr>
       </thead>
-      <tbody>
+      <tbody role="rowgroup">
         {rows.map((row, i) => (
-          <tr key={i}>
+          <tr key={i} role="row">
             {row.map((cell, j) => (
-              <td key={j}>{cell}</td>
+              <td key={j} role="cell" data-label={columns[j]}>{cell}</td>
             ))}
           </tr>
         ))}
@@ -208,7 +223,7 @@ export function SignupsOverTime({ points, granularity, onGranularity }) {
   const area = points.length
     ? `${points.map((p, i) => `${i === 0 ? "M" : "L"}${xAt(i)},${yAt(p.count)}`).join(" ")} L${xAt(points.length - 1)},${plotH} L${xAt(0)},${plotH} Z`
     : "";
-  const xLabels = labelIndices(points.length);
+  const xLabels = labelIndices(points.length, labelBudget(width));
 
   function onMove(e) {
     if (!points.length || !plotW) return;
@@ -375,7 +390,7 @@ export function MembersOverTime({ timeline, subtitle }) {
 
   // Same convention as the waiver line: the month in progress is dashed.
   const partialTail = n > 1 && points[n - 1].partial;
-  const xLabels = labelIndices(n);
+  const xLabels = labelIndices(n, labelBudget(width));
 
   function onMove(e) {
     if (!n || !plotW) return;
@@ -545,6 +560,7 @@ export function StackedColumns({
   const plotH = height - pad.top - pad.bottom;
   const band = buckets.length ? plotW / buckets.length : 0;
   const barW = Math.min(BAR_MAX, Math.max(4, band - 10));
+  const xLabels = labelIndices(buckets.length, labelBudget(width));
 
   return (
     <ChartFrame
@@ -616,7 +632,7 @@ export function StackedColumns({
               })}
 
               {buckets.map((b, i) =>
-                labelIndices(buckets.length).has(i) ? (
+                xLabels.has(i) ? (
                   <text
                     key={`lab-${b.label}`}
                     x={i * band + band / 2}
