@@ -63,6 +63,16 @@ describe("MembersSection", () => {
     expect(screen.queryByText(/members all time/i)).not.toBeInTheDocument();
   });
 
+  it("captions every cell, so the phone card layout can label them", () => {
+    render(<MembersSection data={DATA} loading={false} error="" onRefresh={() => {}} />);
+
+    const row = screen.getByRole("row", { name: /pat lee/i });
+    const labels = within(row)
+      .getAllByRole("cell")
+      .map((cell) => cell.getAttribute("data-label"));
+    expect(labels).toEqual(["Name", "Email", "Plan", "Add Child", "Member since", "Paying", "Last charged"]);
+  });
+
   it("says how many coaches were left out of the count", () => {
     render(<MembersSection data={DATA} loading={false} error="" onRefresh={() => {}} />);
 

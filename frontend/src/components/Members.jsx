@@ -7,6 +7,10 @@ const SALES_SERIES = [
   { key: "events", label: "Events", color: "var(--viz-4)" },
 ];
 
+// Each cell carries its column name, which the phone card layout shows beside
+// the value once the header row is hidden.
+const MEMBER_COLUMNS = ["Name", "Email", "Plan", "Add Child", "Member since", "Paying", "Last charged"];
+
 function formatDate(value) {
   if (!value) return "-";
   const d = new Date(value);
@@ -72,24 +76,30 @@ function MembersPanel({ members }) {
         </header>
         {members.current.length ? (
           <div className="viz-table-wrap members-table-wrap">
-            <table className="viz-table">
-              <thead>
-                <tr>
-                  {["Name", "Email", "Plan", "Add Child", "Member since", "Paying", "Last charged"].map((c) => (
-                    <th key={c} scope="col">{c}</th>
+            <table className="viz-table" role="table">
+              <thead role="rowgroup">
+                <tr role="row">
+                  {MEMBER_COLUMNS.map((c) => (
+                    <th key={c} scope="col" role="columnheader">{c}</th>
                   ))}
                 </tr>
               </thead>
-              <tbody>
+              <tbody role="rowgroup">
                 {members.current.map((row) => (
-                  <tr key={row.email}>
-                    <td>{row.name || "-"}</td>
-                    <td>{row.email}</td>
-                    <td>{row.plans.join(", ") || "-"}</td>
-                    <td>{row.addChild ? "Yes" : "-"}</td>
-                    <td>{formatDate(row.memberSince)}</td>
-                    <td>{paying(row)}</td>
-                    <td>{formatDate(row.lastChargedAt)}</td>
+                  <tr key={row.email} role="row">
+                    {[
+                      row.name || "-",
+                      row.email,
+                      row.plans.join(", ") || "-",
+                      row.addChild ? "Yes" : "-",
+                      formatDate(row.memberSince),
+                      paying(row),
+                      formatDate(row.lastChargedAt),
+                    ].map((value, index) => (
+                      <td key={MEMBER_COLUMNS[index]} role="cell" data-label={MEMBER_COLUMNS[index]}>
+                        {value}
+                      </td>
+                    ))}
                   </tr>
                 ))}
               </tbody>
