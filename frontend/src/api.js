@@ -122,6 +122,14 @@ export function adminArchiveWaiver(auth, id, archived) {
   }).then(handle);
 }
 
+export function adminSavePaperWaiver(auth, payload) {
+  return fetch("/api/admin/paper-waivers", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders(auth) },
+    body: JSON.stringify(payload),
+  }).then(handle);
+}
+
 export function adminListUsers(auth) {
   return fetch("/api/admin/users", { headers: authHeaders(auth) }).then(handle);
 }

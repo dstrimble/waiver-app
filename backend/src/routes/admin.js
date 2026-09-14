@@ -6,6 +6,15 @@ import { syncWaiverNow } from "../matTracker.js";
 import { getWaiverStats } from "../waiverStats.js";
 import { getConversion, getMembersAndSales } from "../squarespaceStats.js";
 import {
+  clean,
+  PAPER_WAIVER_TEXT_VERSION,
+  paperSignedAt,
+  problemWithPaper,
+  problemWithPeople,
+  readSubmission,
+  recordWaiver,
+} from "../waiverSubmission.js";
+import {
   approveAdminUser,
   createSession,
   deleteSession,
@@ -218,7 +227,7 @@ adminRouter.get("/waivers", requireAdmin, async (req, res) => {
         notification_sent_at, notification_error,
         followup_sent_at, followup_error, followup_eligible,
         mattracker_synced_at, mattracker_error, mattracker_eligible,
-        submission_id, archived_at
+        submission_id, archived_at, signed_on_paper
       FROM waiver_submissions
       ${whereClause}
       ORDER BY submitted_at DESC
@@ -302,6 +311,38 @@ adminRouter.post("/waivers/:id/mattracker", requireAdmin, async (req, res) => {
   } catch (err) {
     console.error(`Manual MatTracker send for waiver ${id} failed:`, err);
     return res.status(502).json({ error: `Could not send to MatTracker: ${err.message}` });
+  }
+});
+
+/**
+ * Store a paper waiver, typed in by an admin, with the photo of the signed
+ * page as its signature - then email it and set up MatTracker like any other.
+ */
+adminRouter.post("/paper-waivers", requireAdmin, async (req, res) => {
+  const { signer, participants } = readSubmission(req.body);
+  const scanDataUrl = clean(req.body?.scanDataUrl);
+  const signedOn = clean(req.body?.signedOn);
+
+  const problem =
+    problemWithPeople({ signer, participants }, { emailRequired: false }) ||
+    problemWithPaper({ scanDataUrl, signedOn, confirmedSigned: req.body?.confirmedSigned === true });
+  if (problem) return res.status(400).json({ error: problem });
+
+  try {
+    const { ids } = await recordWaiver({
+      signer,
+      participants,
+      accepted: true,
+      signatureName: signer.name,
+      signatureDataUrl: scanDataUrl,
+      waiverTextVersion: PAPER_WAIVER_TEXT_VERSION,
+      signedOnPaper: true,
+      submittedAt: paperSignedAt(signedOn),
+    });
+    return res.status(201).json({ ok: true, ids, emailed: Boolean(signer.email) });
+  } catch (err) {
+    console.error("Failed to save paper waiver:", err);
+    return res.status(500).json({ error: "Could not save the paper waiver." });
   }
 });
 

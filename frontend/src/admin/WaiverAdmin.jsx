@@ -18,6 +18,7 @@ import {
   foldTail,
 } from "../components/Charts.jsx";
 import ConversionSection from "../components/Conversion.jsx";
+import PaperWaiverUpload from "./PaperWaiverUpload.jsx";
 
 function toDateOnly(date) {
   const year = date.getFullYear();
@@ -80,6 +81,8 @@ export default function WaiverAdmin({ auth }) {
   const [conversionLoading, setConversionLoading] = useState(false);
   const [conversionError, setConversionError] = useState("");
   const [listFilter, setListFilter] = useState("all");
+  const [paperOpen, setPaperOpen] = useState(false);
+  const [paperNotice, setPaperNotice] = useState("");
 
   const today = useMemo(() => new Date(), []);
   const defaultEnd = toDateOnly(today);
@@ -104,8 +107,10 @@ export default function WaiverAdmin({ auth }) {
         if (!current) return rows[0] || null;
         return rows.find((row) => row.id === current.id) || rows[0] || null;
       });
+      return rows;
     } catch (err) {
       setWaiversError(err.message || "Failed to load waivers.");
+      return null;
     } finally {
       setWaiversLoading(false);
     }
@@ -194,6 +199,20 @@ export default function WaiverAdmin({ auth }) {
     } finally {
       setRowBusy("");
     }
+  }
+
+  // A paper waiver can be dated before the list's range, so it is only
+  // selected when the reloaded list has it.
+  async function paperSaved({ ids = [], name, emailed }) {
+    setPaperOpen(false);
+    setPaperNotice(
+      emailed
+        ? `Saved ${name}'s paper waiver. It gets the same PDF email and MatTracker setup as an online one.`
+        : `Saved ${name}'s paper waiver. There's no email on it, so only the gym gets the PDF and no MatTracker account is set up.`
+    );
+    const [rows] = await Promise.all([loadWaivers(dateRange.start, dateRange.end), loadStats()]);
+    const saved = rows?.find((row) => ids.map(String).includes(String(row.id)));
+    if (saved) setSelectedWaiver(saved);
   }
 
   async function toggleShowArchived() {
@@ -355,7 +374,23 @@ export default function WaiverAdmin({ auth }) {
             after signing
           </p>
         ) : null}
+        <button
+          type="button"
+          className="viz-toggle"
+          disabled={paperOpen}
+          onClick={() => {
+            setPaperOpen(true);
+            setPaperNotice("");
+          }}
+        >
+          Add a paper waiver
+        </button>
       </div>
+
+      {paperNotice ? <p className="success">{paperNotice}</p> : null}
+      {paperOpen ? (
+        <PaperWaiverUpload auth={auth} onSaved={paperSaved} onCancel={() => setPaperOpen(false)} />
+      ) : null}
 
       <div className="admin-grid">
         <div className="waiver-list" role="list">
@@ -390,6 +425,7 @@ export default function WaiverAdmin({ auth }) {
                     {familySizes[row.submission_id] > 1 ? (
                       <span className="badge-family">Family of {familySizes[row.submission_id]}</span>
                     ) : null}
+                    {row.signed_on_paper ? <span className="badge-paper">Paper</span> : null}
                     {outcome?.status === "joined" ? (
                       <span className="badge-joined">Became a member</span>
                     ) : outcome?.status === "alreadyPaying" ? (
@@ -411,9 +447,16 @@ export default function WaiverAdmin({ auth }) {
                 {selectedWaiver.name}
                 {selectedWaiver.archived_at ? <span className="badge-archived">Archived</span> : null}
               </h3>
-              <p>
-                <strong>Submitted:</strong> {toDisplayDate(selectedWaiver.submitted_at)}
-              </p>
+              {selectedWaiver.signed_on_paper ? (
+                <p>
+                  <strong>Signed on paper:</strong>{" "}
+                  {new Date(selectedWaiver.submitted_at).toLocaleDateString()} - entered from a photo
+                </p>
+              ) : (
+                <p>
+                  <strong>Submitted:</strong> {toDisplayDate(selectedWaiver.submitted_at)}
+                </p>
+              )}
               <p>
                 <strong>Email:</strong> {selectedWaiver.email || "-"}
               </p>
@@ -585,11 +628,17 @@ export default function WaiverAdmin({ auth }) {
 
               <div className="signature-preview">
                 <p>
-                  <strong>Signature:</strong> {selectedWaiver.signature_name}
+                  <strong>{selectedWaiver.signed_on_paper ? "Signed waiver:" : "Signature:"}</strong>{" "}
+                  {selectedWaiver.signature_name}
                 </p>
                 <img
+                  className={selectedWaiver.signed_on_paper ? "is-paper" : undefined}
                   src={selectedWaiver.signature_data_url}
-                  alt={`Signature for ${selectedWaiver.signature_name}`}
+                  alt={
+                    selectedWaiver.signed_on_paper
+                      ? `Photo of the paper waiver signed by ${selectedWaiver.signature_name}`
+                      : `Signature for ${selectedWaiver.signature_name}`
+                  }
                 />
               </div>
             </>

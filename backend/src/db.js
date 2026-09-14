@@ -98,6 +98,13 @@ ALTER TABLE waiver_submissions
 ALTER TABLE waiver_submissions
   ALTER COLUMN mattracker_eligible SET DEFAULT true;
 
+-- Waivers signed on paper and entered from a photo on the admin page. Their
+-- signature_data_url is the photo of the signed page, cropped to the paper,
+-- and their waiver_text_version is 'paper': the printed copy is what they
+-- agreed to.
+ALTER TABLE waiver_submissions
+  ADD COLUMN IF NOT EXISTS signed_on_paper BOOLEAN NOT NULL DEFAULT false;
+
 CREATE INDEX IF NOT EXISTS idx_waiver_mattracker_queue
   ON waiver_submissions (submitted_at)
   WHERE mattracker_synced_at IS NULL AND mattracker_eligible AND archived_at IS NULL;

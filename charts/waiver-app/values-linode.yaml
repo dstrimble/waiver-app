@@ -72,6 +72,9 @@ ingress:
   host: gravitas.trimblebarra.com
   annotations:
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    # The photo of a paper waiver, saved from the admin page, can be larger
+    # than the ingress's 1 MB default.
+    nginx.ingress.kubernetes.io/proxy-body-size: "12m"
   tls:
     enabled: false
 

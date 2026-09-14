@@ -1598,8 +1598,8 @@ describe("family waivers", () => {
     expect(res.body.ids).toEqual([21, 22, 23]);
     const [sql, params] = insertCall();
     expect(sql).toMatch(/INSERT INTO waiver_submissions/);
-    expect(params).toHaveLength(60);
-    const rows = [0, 1, 2].map((i) => params.slice(i * 20, i * 20 + 20));
+    expect(params).toHaveLength(66);
+    const rows = [0, 1, 2].map((i) => params.slice(i * 22, i * 22 + 22));
     expect(rows[0][COL.submission]).toMatch(/^[0-9a-f-]{36}$/);
     expect(new Set(rows.map((r) => r[COL.submission])).size).toBe(1);
     expect(rows.map((r) => r[COL.name])).toEqual(["Jane Smith", "Max Smith", "Ada Smith"]);
@@ -1619,9 +1619,9 @@ describe("family waivers", () => {
 
     expect(res.status).toBe(201);
     const params = insertCall()[1];
-    expect(params).toHaveLength(40);
-    expect([params[COL.name], params[20 + COL.name]]).toEqual(["Max Smith", "Ada Smith"]);
-    expect([params[COL.parent], params[20 + COL.parent]]).toEqual(["Jane Smith", "Jane Smith"]);
+    expect(params).toHaveLength(44);
+    expect([params[COL.name], params[22 + COL.name]]).toEqual(["Max Smith", "Ada Smith"]);
+    expect([params[COL.parent], params[22 + COL.parent]]).toEqual(["Jane Smith", "Jane Smith"]);
   });
 
   it("sends one confirmation for the whole family", async () => {
@@ -1755,6 +1755,117 @@ describe("family waivers", () => {
     expect(res.status).toBe(201);
     const params = insertCall()[1];
     expect([params[COL.name], params[COL.parent], params[COL.dob]]).toEqual(["Kit Kid", "Pat Parent", "2017-03-03"]);
+  });
+});
+
+describe("paper waivers", () => {
+  const PAPER = {
+    signer: { name: "Jane Smith", email: "jane@example.com", city: "Conway" },
+    participants: [
+      { isSigner: true, dateOfBirth: "1990-04-02", interests: ["BJJ"] },
+      { name: "Max Smith", dateOfBirth: "2016-05-01", interests: ["Kids Classes"] },
+    ],
+    signedOn: "2026-09-10",
+    confirmedSigned: true,
+    scanDataUrl: SIGNATURE_PNG,
+  };
+  const STORED = { rows: [31, 32].map((id) => ({ id, submitted_at: "2026-09-10T12:00:00.000Z" })) };
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 150));
+  const asAdmin = (req) => req.set("x-admin-passcode", "changeme");
+  const savePaper = (body = PAPER) => asAdmin(request(createApp()).post("/api/admin/paper-waivers")).send(body);
+  const insertCall = () => queryMock.mock.calls.find(([sql]) => sql.includes("INSERT INTO waiver_submissions"));
+
+  beforeEach(async () => {
+    await settle();
+    queryMock.mockReset();
+    queryMock.mockResolvedValue(STORED);
+    sendMailMock.mockReset();
+    sendMailMock.mockResolvedValue({ messageId: "<abc@local>", accepted: [], rejected: [] });
+    process.env.ADMIN_PASSCODE = "changeme";
+    process.env.WAIVER_NOTIFY_EMAIL = "gravitasmma@gmail.com";
+  });
+
+  afterEach(async () => {
+    await settle();
+    delete process.env.SPARTRACKER_WAIVER_URL;
+    delete process.env.SPARTRACKER_WAIVER_TOKEN;
+    vi.unstubAllGlobals();
+  });
+
+  it("stores a paper waiver with the photo as its signature, and sends it on like any other", async () => {
+    process.env.SPARTRACKER_WAIVER_URL = "https://mattracker.example.com/api/waiver-signed";
+    process.env.SPARTRACKER_WAIVER_TOKEN = "waiver-token";
+    const fetchMock = vi.fn(() => Promise.resolve({ ok: true, text: () => Promise.resolve("{}") }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await savePaper();
+
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ ids: [31, 32], emailed: true });
+    const [sql, params] = insertCall();
+    expect(params).toHaveLength(44);
+    const rows = [0, 1].map((i) => params.slice(i * 22, i * 22 + 22));
+    expect(rows.map((r) => [r[2], r[3]])).toEqual([
+      ["Jane Smith", null],
+      ["Max Smith", "Jane Smith"],
+    ]);
+    for (const row of rows) {
+      // waiver_text_version, accepted, signature_name, signature_data_url, signed_on_paper
+      expect(row.slice(16, 21)).toEqual(["paper", true, "Jane Smith", SIGNATURE_PNG, true]);
+      // Dated by what is written on the page.
+      expect(row[21]).toEqual(new Date("2026-09-10T12:00:00Z"));
+    }
+    expect(sql).toMatch(/COALESCE\(\$22::timestamptz, now\(\)\)/);
+
+    await waitFor("both emails", () => sendMailMock.mock.calls.length === 2);
+    const gym = sendMailMock.mock.calls.find(([m]) => m.to === "gravitasmma@gmail.com")[0];
+    expect(gym.text).toContain("Signed on paper");
+    expect(gym.attachments[0].content.subarray(0, 5).toString()).toBe("%PDF-");
+    expect(sendMailMock.mock.calls.some(([m]) => m.to === "jane@example.com")).toBe(true);
+
+    await waitFor("the MatTracker call", () => fetchMock.mock.calls.length === 1);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.participants).toEqual([{ name: "Jane Smith" }, { name: "Max Smith" }]);
+  });
+
+  it("keeps a paper waiver with no email on it, and emails only the gym", async () => {
+    queryMock.mockResolvedValue({ rows: [STORED.rows[0]] });
+
+    const res = await savePaper({ ...PAPER, signer: { name: "Jane Smith" }, participants: [PAPER.participants[0]] });
+
+    expect(res.status).toBe(201);
+    expect(res.body.emailed).toBe(false);
+    await waitFor("the gym's email", () => sendMailMock.mock.calls.length === 1);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(sendMailMock.mock.calls.map(([m]) => m.to)).toEqual(["gravitasmma@gmail.com"]);
+  });
+
+  it("renders the photo of the signed page into the PDF", async () => {
+    const pdf = await renderWaiverPdf({ ...SUBMISSION, signedOnPaper: true, waiverTextVersion: "paper" });
+
+    expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");
+    // The photo gets a page of its own after the details.
+    expect(pdf.toString("latin1").match(/\/Type \/Page\b/g)).toHaveLength(2);
+  });
+
+  it.each([
+    ["nobody has checked it is signed", { confirmedSigned: false }, /Check the paper waiver is signed/],
+    ["there is no photo", { scanDataUrl: undefined }, /Add the photo/],
+    ["it is dated in the future", { signedOn: "2099-01-01" }, /can't be in the future/],
+    ["an adult is listed as a child", { participants: [{ name: "Grown Kid", dateOfBirth: "1990-01-01" }] }, /18 or over/],
+  ])("refuses a paper waiver where %s", async (_label, change, message) => {
+    const res = await savePaper({ ...PAPER, ...change });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(message);
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+
+  it("is for admins only", async () => {
+    const res = await request(createApp()).post("/api/admin/paper-waivers").send(PAPER);
+
+    expect(res.status).toBe(401);
+    expect(queryMock).not.toHaveBeenCalled();
   });
 });
 

@@ -289,6 +289,9 @@ export function buildGymEmail(submission, config) {
   ];
   const reference = referencesOf(submission);
   const who = joinNames(people.map((person) => person.name));
+  const attached = submission.signedOnPaper
+    ? "Signed on paper and entered from a photo; the PDF attached includes the photo of the signed page."
+    : "The signed waiver PDF is attached.";
 
   const text = [
     `New waiver signed at ${config.gymName}.`,
@@ -296,7 +299,7 @@ export function buildGymEmail(submission, config) {
     ...rows.map(([label, value]) => `${label}: ${fallback(value)}`),
     "",
     `Reference: ${reference}`,
-    "The signed waiver PDF is attached.",
+    attached,
   ].join("\n");
 
   const html = htmlShell(
@@ -316,7 +319,7 @@ export function buildGymEmail(submission, config) {
      </table>
      <p style="margin:24px 0 0;color:#555;font-size:14px;">Reference ${escapeHtml(
        reference
-     )}. The signed waiver PDF is attached.</p>`
+     )}. ${escapeHtml(attached)}</p>`
   );
 
   return {

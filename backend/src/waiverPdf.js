@@ -21,6 +21,16 @@ function formatTimestamp(value) {
   });
 }
 
+// A paper waiver has a date written on it, not a time.
+function formatDay(value) {
+  const date = value ? new Date(value) : new Date();
+  if (Number.isNaN(date.getTime())) return String(value || "");
+  return date.toLocaleDateString("en-US", {
+    timeZone: process.env.DISPLAY_TIMEZONE || "America/New_York",
+    dateStyle: "long",
+  });
+}
+
 function formatDateOnly(value) {
   if (!value) return "";
   const raw = value instanceof Date ? value.toISOString().slice(0, 10) : String(value).slice(0, 10);
@@ -30,12 +40,12 @@ function formatDateOnly(value) {
   return `${month}/${day}/${year}`;
 }
 
-function decodeSignature(dataUrl) {
-  const raw = String(dataUrl || "");
-  const prefix = "data:image/png;base64,";
-  if (!raw.startsWith(prefix)) return null;
+// A drawn signature is a PNG; the photo of a paper waiver is usually a JPEG.
+function decodeImage(dataUrl) {
+  const match = String(dataUrl || "").match(/^data:image\/(?:png|jpeg);base64,(.+)$/);
+  if (!match) return null;
   try {
-    const buffer = Buffer.from(raw.slice(prefix.length), "base64");
+    const buffer = Buffer.from(match[1], "base64");
     return buffer.length ? buffer : null;
   } catch {
     return null;
@@ -86,6 +96,100 @@ function fieldRows(doc, rows) {
   }
 }
 
+function footnote(doc, text) {
+  doc.moveDown(1.5);
+  doc.font("Helvetica").fontSize(8).fillColor(MUTED).text(text, { align: "center" });
+}
+
+// The online copy they agreed to, and the signature they drew under it.
+function onlineSignature(doc, submission, { signerName, minors }) {
+  sectionHeading(doc, "Waiver & Release");
+  doc.font("Helvetica").fontSize(9.5).fillColor(INK);
+  for (const paragraph of WAIVER_PARAGRAPHS) {
+    doc.text(paragraph, { align: "justify", lineGap: 1.5 });
+    doc.moveDown(0.7);
+  }
+
+  // Keep the heading, acceptance line and signature on one page.
+  const signatureHeight = 70;
+  const signatureBlockHeight = signatureHeight + 130;
+  if (doc.y + signatureBlockHeight > doc.page.height - MARGIN) doc.addPage();
+
+  sectionHeading(doc, "Acknowledgement & Signature");
+  doc
+    .font("Helvetica")
+    .fontSize(10)
+    .fillColor(INK)
+    .text(`${submission.accepted ? "[X]" : "[ ]"} ${WAIVER_ACCEPTANCE_STATEMENT}`);
+  if (minors.length) {
+    doc.moveDown(0.4);
+    doc.text(
+      `Signed by ${signerName} as parent or legal guardian of ${joinNames(
+        minors.map((person) => person.name)
+      )}.`
+    );
+  }
+  doc.moveDown(0.8);
+
+  const signature = decodeImage(submission.signatureDataUrl);
+  if (signature) {
+    const top = doc.y;
+    doc.image(signature, MARGIN, top, { fit: [260, signatureHeight], align: "left" });
+    doc.y = top + signatureHeight;
+  } else {
+    doc.font("Helvetica-Oblique").fontSize(9).fillColor(MUTED).text("(signature image unavailable)");
+  }
+
+  doc
+    .moveTo(MARGIN, doc.y + 2)
+    .lineTo(MARGIN + 260, doc.y + 2)
+    .strokeColor(RULE)
+    .lineWidth(0.5)
+    .stroke();
+  doc.y += 8;
+  doc.x = MARGIN;
+
+  fieldRows(doc, [
+    ["Signed By", submission.signatureName],
+    ["Signed On", formatTimestamp(submission.submittedAt)],
+  ]);
+
+  footnote(doc, "This document is an electronic record of a waiver signed online. Retain it for your records.");
+}
+
+// The printed copy is what they agreed to, so the photo of the signed page is
+// the record; it gets a page of its own.
+function paperSignature(doc, submission) {
+  sectionHeading(doc, "Waiver & Release");
+  doc
+    .font("Helvetica")
+    .fontSize(10)
+    .fillColor(INK)
+    .text("This waiver was signed on paper at the gym. A photo of the signed page follows.");
+  doc.moveDown(0.6);
+  fieldRows(doc, [
+    ["Signed By", submission.signatureName],
+    ["Signed On", formatDay(submission.submittedAt)],
+  ]);
+
+  footnote(
+    doc,
+    "This document records a waiver signed on paper, entered from a photo of the signed page. Retain it for your records."
+  );
+
+  doc.addPage();
+  const scan = decodeImage(submission.signatureDataUrl);
+  if (scan) {
+    doc.image(scan, MARGIN, MARGIN, {
+      fit: [doc.page.width - MARGIN * 2, doc.page.height - MARGIN * 2],
+      align: "center",
+      valign: "center",
+    });
+  } else {
+    doc.font("Helvetica-Oblique").fontSize(9).fillColor(MUTED).text("(photo of the signed waiver unavailable)");
+  }
+}
+
 /**
  * Render a signed waiver as a PDF.
  *
@@ -118,7 +222,11 @@ export function renderWaiverPdf(submission, { gymName = "Gravitas Mixed Martial 
       doc
         .fontSize(9)
         .fillColor(MUTED)
-        .text(`Submitted: ${formatTimestamp(submission.submittedAt)}`)
+        .text(
+          submission.signedOnPaper
+            ? `Signed on paper: ${formatDay(submission.submittedAt)}`
+            : `Submitted: ${formatTimestamp(submission.submittedAt)}`
+        )
         .text(
           `Reference: ${referencesOf(submission)}   |   Waiver text version: ${
             submission.waiverTextVersion || WAIVER_TEXT_VERSION
@@ -157,68 +265,11 @@ export function renderWaiverPdf(submission, { gymName = "Gravitas Mixed Martial 
         ]);
       });
 
-      sectionHeading(doc, "Waiver & Release");
-      doc.font("Helvetica").fontSize(9.5).fillColor(INK);
-      for (const paragraph of WAIVER_PARAGRAPHS) {
-        doc.text(paragraph, { align: "justify", lineGap: 1.5 });
-        doc.moveDown(0.7);
-      }
-
-      // Keep the heading, acceptance line and signature on one page.
-      const signatureHeight = 70;
-      const signatureBlockHeight = signatureHeight + 130;
-      if (doc.y + signatureBlockHeight > doc.page.height - MARGIN) doc.addPage();
-
-      sectionHeading(doc, "Acknowledgement & Signature");
-      doc
-        .font("Helvetica")
-        .fontSize(10)
-        .fillColor(INK)
-        .text(
-          `${submission.accepted ? "[X]" : "[ ]"} ${WAIVER_ACCEPTANCE_STATEMENT}`
-        );
-      if (minors.length) {
-        doc.moveDown(0.4);
-        doc.text(
-          `Signed by ${signerName} as parent or legal guardian of ${joinNames(
-            minors.map((person) => person.name)
-          )}.`
-        );
-      }
-      doc.moveDown(0.8);
-
-      const signature = decodeSignature(submission.signatureDataUrl);
-      if (signature) {
-        const top = doc.y;
-        doc.image(signature, MARGIN, top, { fit: [260, signatureHeight], align: "left" });
-        doc.y = top + signatureHeight;
+      if (submission.signedOnPaper) {
+        paperSignature(doc, submission);
       } else {
-        doc.font("Helvetica-Oblique").fontSize(9).fillColor(MUTED).text("(signature image unavailable)");
+        onlineSignature(doc, submission, { signerName, minors });
       }
-
-      doc
-        .moveTo(MARGIN, doc.y + 2)
-        .lineTo(MARGIN + 260, doc.y + 2)
-        .strokeColor(RULE)
-        .lineWidth(0.5)
-        .stroke();
-      doc.y += 8;
-      doc.x = MARGIN;
-
-      fieldRows(doc, [
-        ["Signed By", submission.signatureName],
-        ["Signed On", formatTimestamp(submission.submittedAt)],
-      ]);
-
-      doc.moveDown(1.5);
-      doc
-        .font("Helvetica")
-        .fontSize(8)
-        .fillColor(MUTED)
-        .text(
-          "This document is an electronic record of a waiver signed online. Retain it for your records.",
-          { align: "center" }
-        );
 
       doc.end();
     } catch (err) {

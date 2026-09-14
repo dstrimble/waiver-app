@@ -23,6 +23,9 @@ A standalone waiver submission app with e-signature support.
 - Automatic "how was your trial week?" email a week after signing
 - Admin dashboard: signup trends, interest mix, referral sources, age bands
 - Admin can send the trial follow-up early, or archive a waiver
+- Paper waivers: photograph one on the admin page, type in its details, and it
+  is stored, emailed and sent to MatTracker like an online waiver, with the
+  photo cropped to the page as its signature
 - Admin members and sales from Squarespace: members over time, current
   members, and monthly sales split into memberships, retail and events
 - Admin listing endpoint secured by passcode header
@@ -58,6 +61,7 @@ npm run dev
 - `POST /api/admin/waivers/:id/followup` - send the trial follow-up now
 - `POST /api/admin/waivers/:id/archive` - hide a waiver, keeping the record
 - `POST /api/admin/waivers/:id/restore` - bring an archived waiver back
+- `POST /api/admin/paper-waivers` - store a paper waiver typed in from its photo
 - `GET /api/admin/members` - members and sales from Squarespace
 - `GET /api/admin/conversion` - how many waiver signers became members (both
   Squarespace routes take `?refresh=true` to skip the half-hour cache)
@@ -72,6 +76,21 @@ npm run dev
 Apart from the two `auth/config` and `auth/google` routes, every `/api/admin/*`
 route needs either the `x-admin-passcode` header or a Google session token as
 `Authorization: Bearer <token>`.
+
+## Paper Waivers
+
+**Add a paper waiver** on the waiver page takes a photo of a signed paper
+waiver. The admin drags a handle onto each corner of the page, types in the
+details from the paper, confirms it is signed, and saves. The browser then
+flattens the page out of the photo - nothing outside the paper is kept - and
+that image is stored as the waiver's signature. From there it is the same as an
+online waiver: one row per person, the PDF (with the photo on its own page)
+emailed to the gym and the signer, the MatTracker account, and the follow-up a
+week after the date written on it.
+
+Paper waivers are stored with `signed_on_paper = true` and
+`waiver_text_version = 'paper'`, since the printed copy is what was agreed to.
+One without an email can still be saved; only the gym is emailed then.
 
 ## Admin Sign-In
 

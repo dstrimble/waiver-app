@@ -985,6 +985,171 @@ input[type="checkbox"] {
   cursor: pointer;
 }
 
+/* Paper waivers: a photo in, the page cropped out of it, the details checked by hand. */
+.waiver-list-controls > .viz-toggle {
+  margin-left: auto;
+}
+
+.paper-waiver {
+  margin-top: 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper-soft);
+  padding: 0.9rem;
+}
+
+.paper-pick {
+  margin-top: 0.8rem;
+  max-width: 420px;
+}
+
+.paper-review {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.paper-review-photo {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.6rem;
+}
+
+.paper-review-photo .person-sub,
+.paper-review-fields .field-grid {
+  margin-top: 0;
+}
+
+.paper-review-fields .field-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 0.8rem;
+}
+
+.paper-photo {
+  position: relative;
+  width: 100%;
+  line-height: 0;
+  touch-action: none;
+  user-select: none;
+}
+
+.paper-photo img {
+  width: 100%;
+  border-radius: 8px;
+}
+
+.paper-photo svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.paper-photo-outside {
+  fill: rgba(5, 8, 12, 0.55);
+}
+
+.paper-photo-page {
+  fill: none;
+  stroke: var(--viz-1);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.paper-corner {
+  position: absolute;
+  width: 30px;
+  height: 30px;
+  margin: -15px 0 0 -15px;
+  padding: 0;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  background: var(--viz-1);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.45);
+  cursor: grab;
+  touch-action: none;
+}
+
+.paper-corner:active {
+  cursor: grabbing;
+}
+
+.paper-corner:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.paper-preview {
+  margin: 0;
+}
+
+.paper-preview img {
+  display: block;
+  width: 100%;
+  max-width: 280px;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.paper-preview figcaption {
+  margin-top: 0.3rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.paper-notes {
+  margin: 0 0 0.8rem;
+  padding: 0.55rem 0.7rem;
+  border-left: 3px solid var(--viz-4);
+  background: rgba(201, 133, 0, 0.1);
+  border-radius: 4px;
+  font-size: 0.88rem;
+}
+
+.paper-interests {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  margin: 0.7rem 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.paper-interests legend {
+  width: 100%;
+  margin-bottom: 0.3rem;
+}
+
+.waiver-row .badge-paper {
+  padding: 0.05rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.signature-preview img.is-paper {
+  max-width: 520px;
+  background: #ffffff;
+}
+
+@media (max-width: 860px) {
+  .paper-review {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .paper-review-fields .field-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Members and sales from Squarespace - a second dashboard under the waiver one. */
 .squarespace-section {
   margin-top: 2rem;
