@@ -57,6 +57,12 @@ spec:
                   name: app-secrets
                   key: SPARTRACKER_WAIVER_TOKEN
                   optional: true
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: ANTHROPIC_API_KEY
+                  optional: true
             - name: SPARTRACKER_WAIVER_URL
               value: "https://mattracker.trimblebarra.com/api/waiver-signed"
             - name: MATTRACKER_URL

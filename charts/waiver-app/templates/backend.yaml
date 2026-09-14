@@ -81,6 +81,16 @@ spec:
                   name: {{ .Values.secret.name }}
                   key: SPARTRACKER_WAIVER_TOKEN
                   optional: true
+            {{- /*
+              Claude API key for reading photos of paper waivers. Optional:
+              without it staff type a paper waiver in by hand instead.
+            */}}
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secret.name }}
+                  key: ANTHROPIC_API_KEY
+                  optional: true
             {{- range $key, $value := .Values.email }}
             {{- if $value }}
             - name: {{ $key }}

@@ -15,6 +15,9 @@ secret:
   squarespaceApiKey: ""
   # Bearer token MatTracker (spartracker) issued for /api/waiver-signed.
   spartrackerWaiverToken: ""
+  # Claude API key for reading photos of paper waivers on the admin page.
+  # Without it, paper waivers are still entered - typed in by hand.
+  anthropicApiKey: ""
 
 # Non-secret waiver-email settings, passed straight through as backend env vars.
 # Blank values are omitted, and the email leaves out the matching section.
@@ -168,7 +171,11 @@ ingress:
   enabled: true
   className: nginx
   host: waiver.example.com
-  annotations: {}
+  # Photos of paper waivers are uploaded from the admin page and read by
+  # Claude; the ingress defaults are 1 MB and 60 seconds.
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "12m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
   paths:
     - /waiver
     - /admin

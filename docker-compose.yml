@@ -58,6 +58,9 @@ services:
       # local run never creates accounts in the real MatTracker.
       SPARTRACKER_WAIVER_URL: "${SPARTRACKER_WAIVER_URL:-}"
       SPARTRACKER_WAIVER_TOKEN: "${SPARTRACKER_WAIVER_TOKEN:-}"
+      # Claude API key for reading photos of paper waivers on the admin page.
+      # Unset, paper waivers are typed in by hand.
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
     depends_on:
       db:
         condition: service_healthy

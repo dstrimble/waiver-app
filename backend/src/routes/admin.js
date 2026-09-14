@@ -6,6 +6,21 @@ import { syncWaiverNow } from "../matTracker.js";
 import { getWaiverStats } from "../waiverStats.js";
 import { getConversion, getMembersAndSales } from "../squarespaceStats.js";
 import {
+  isPaperReaderConfigured,
+  PaperReadError,
+  parseImageDataUrl,
+  readPaperWaiver,
+} from "../paperWaiverReader.js";
+import {
+  clean,
+  PAPER_WAIVER_TEXT_VERSION,
+  paperSignedAt,
+  problemWithPaper,
+  problemWithPeople,
+  readSubmission,
+  recordWaiver,
+} from "../waiverSubmission.js";
+import {
   approveAdminUser,
   createSession,
   deleteSession,
@@ -218,7 +233,7 @@ adminRouter.get("/waivers", requireAdmin, async (req, res) => {
         notification_sent_at, notification_error,
         followup_sent_at, followup_error, followup_eligible,
         mattracker_synced_at, mattracker_error, mattracker_eligible,
-        submission_id, archived_at
+        submission_id, archived_at, signed_on_paper
       FROM waiver_submissions
       ${whereClause}
       ORDER BY submitted_at DESC
@@ -302,6 +317,66 @@ adminRouter.post("/waivers/:id/mattracker", requireAdmin, async (req, res) => {
   } catch (err) {
     console.error(`Manual MatTracker send for waiver ${id} failed:`, err);
     return res.status(502).json({ error: `Could not send to MatTracker: ${err.message}` });
+  }
+});
+
+/**
+ * Read a photo of a paper waiver: its fields, for a person to check, and the
+ * page's corners, for cropping. Nothing is stored.
+ */
+adminRouter.post("/paper-waivers/read", requireAdmin, async (req, res) => {
+  if (!isPaperReaderConfigured()) {
+    return res
+      .status(503)
+      .json({ error: "Reading photos is not set up on this server, so type the waiver in by hand." });
+  }
+
+  const photo = parseImageDataUrl(req.body?.image);
+  if (!photo) return res.status(400).json({ error: "Send the photo as a JPEG, PNG or WebP image." });
+  const width = Number(req.body?.width);
+  const height = Number(req.body?.height);
+  if (![width, height].every((n) => Number.isInteger(n) && n > 0 && n <= 10_000)) {
+    return res.status(400).json({ error: "The photo's width and height are required." });
+  }
+
+  try {
+    return res.json(await readPaperWaiver({ ...photo, width, height }));
+  } catch (err) {
+    if (err instanceof PaperReadError) return res.status(422).json({ error: err.message });
+    console.error("Reading a paper waiver failed:", err);
+    return res.status(502).json({ error: "Claude could not read the photo just now." });
+  }
+});
+
+/**
+ * Store a paper waiver, checked by a person, with the photo of the signed page
+ * as its signature - then email it and set up MatTracker like any other.
+ */
+adminRouter.post("/paper-waivers", requireAdmin, async (req, res) => {
+  const { signer, participants } = readSubmission(req.body);
+  const scanDataUrl = clean(req.body?.scanDataUrl);
+  const signedOn = clean(req.body?.signedOn);
+
+  const problem =
+    problemWithPeople({ signer, participants }, { emailRequired: false }) ||
+    problemWithPaper({ scanDataUrl, signedOn, confirmedSigned: req.body?.confirmedSigned === true });
+  if (problem) return res.status(400).json({ error: problem });
+
+  try {
+    const { ids } = await recordWaiver({
+      signer,
+      participants,
+      accepted: true,
+      signatureName: signer.name,
+      signatureDataUrl: scanDataUrl,
+      waiverTextVersion: PAPER_WAIVER_TEXT_VERSION,
+      signedOnPaper: true,
+      submittedAt: paperSignedAt(signedOn),
+    });
+    return res.status(201).json({ ok: true, ids, emailed: Boolean(signer.email) });
+  } catch (err) {
+    console.error("Failed to save paper waiver:", err);
+    return res.status(500).json({ error: "Could not save the paper waiver." });
   }
 });
 

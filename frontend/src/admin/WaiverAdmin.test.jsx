@@ -33,6 +33,16 @@ const WAIVERS = [
     submitted_at: "2026-08-02T12:00:00Z",
   },
   { id: "4", name: "Old Member", email: "member@example.com", date_of_birth: null, submitted_at: "2026-08-04T12:00:00Z" },
+  {
+    id: "5",
+    name: "Paper Signer",
+    email: "paper@example.com",
+    date_of_birth: bornYearsAgo(40),
+    submitted_at: "2026-08-05T12:00:00Z",
+    signed_on_paper: true,
+    signature_name: "Paper Signer",
+    signature_data_url: "data:image/jpeg;base64,SCAN",
+  },
 ];
 
 const CONVERSION = {
@@ -118,7 +128,7 @@ describe("WaiverAdmin list", () => {
     expect(names()).toEqual(["Kit Kid"]);
 
     fireEvent.click(screen.getByRole("button", { name: "Adults" }));
-    expect(names()).toEqual(["Ada Adult", "Teen Fourteen"]);
+    expect(names()).toEqual(["Ada Adult", "Teen Fourteen", "Paper Signer"]);
 
     fireEvent.click(screen.getByRole("button", { name: "Became members" }));
     expect(names()).toEqual(["Ada Adult"]);
@@ -147,6 +157,31 @@ describe("WaiverAdmin list", () => {
     expect(await screen.findByText("Ada Adult is set up in MatTracker.")).toBeInTheDocument();
     const call = fetch.mock.calls.find(([url]) => url === "/api/admin/waivers/1/mattracker");
     expect(call[1]).toMatchObject({ method: "POST", headers: { "x-admin-passcode": "x" } });
+  });
+
+  it("marks waivers signed on paper and shows the photo of the page", async () => {
+    render(<WaiverAdmin auth={{ passcode: "x" }} />);
+    await waitForList();
+
+    expect(within(rowFor("Paper Signer")).getByText("Paper")).toBeInTheDocument();
+    expect(within(rowFor("Ada Adult")).queryByText("Paper")).not.toBeInTheDocument();
+
+    fireEvent.click(rowFor("Paper Signer"));
+    expect(screen.getByText(/entered from a photo/)).toBeInTheDocument();
+    expect(screen.getByAltText("Photo of the paper waiver signed by Paper Signer")).toHaveAttribute(
+      "src",
+      "data:image/jpeg;base64,SCAN"
+    );
+  });
+
+  it("opens the paper waiver upload from the list", async () => {
+    render(<WaiverAdmin auth={{ passcode: "x" }} />);
+    await waitForList();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add a paper waiver" }));
+
+    expect(screen.getByLabelText(/photo of the signed waiver/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add a paper waiver" })).toBeDisabled();
   });
 
   it("leaves out membership marks when Squarespace is not connected", async () => {

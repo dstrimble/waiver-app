@@ -3,6 +3,11 @@ kind: Ingress
 metadata:
   name: waiver-app
   namespace: gravitas
+  annotations:
+    # Photos of paper waivers are uploaded from the admin page and read by
+    # Claude; the ingress defaults are 1 MB and 60 seconds.
+    nginx.ingress.kubernetes.io/proxy-body-size: "12m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
 spec:
   ingressClassName: nginx
   rules:
