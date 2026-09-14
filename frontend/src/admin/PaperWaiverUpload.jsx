@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { adminReadPaperWaiver, adminSavePaperWaiver } from "../api.js";
-import { cropToPage, FULL_FRAME, isUsablePage, loadPhoto } from "./paperScan.js";
+import { adminSavePaperWaiver } from "../api.js";
+import { cropToPage, FULL_FRAME, loadPhoto } from "./paperScan.js";
 
 const INTERESTS = ["BJJ", "Kickboxing", "MMA", "Kids Classes"];
 
@@ -29,9 +29,9 @@ const EMPTY_SIGNER = Object.fromEntries(SIGNER_FIELDS.map((field) => [field.key,
 const CORNER_NAMES = ["Top-left", "Top-right", "Bottom-right", "Bottom-left"];
 
 let nextKidKey = 0;
-function newKid(fields = {}) {
+function newKid() {
   nextKidKey += 1;
-  return { key: nextKidKey, name: "", dateOfBirth: "", interests: ["Kids Classes"], ...fields };
+  return { key: nextKidKey, name: "", dateOfBirth: "", interests: ["Kids Classes"] };
 }
 
 function blankForm() {
@@ -44,36 +44,19 @@ function blankForm() {
   };
 }
 
-/** The form, filled in from what Claude read off the page. */
-export function formFromReading(reading) {
-  const self = reading.participants.find((person) => person.isSigner);
-  const kids = reading.participants.filter((person) => !person.isSigner);
-  return {
-    who: self ? (kids.length ? "both" : "me") : kids.length ? "kids" : "me",
-    signer: { ...EMPTY_SIGNER, ...reading.signer, name: reading.signer.name || self?.name || "" },
-    self: { dateOfBirth: self?.dateOfBirth || "", interests: self?.interests || [] },
-    kids: kids.length
-      ? kids.map((kid) => newKid({ name: kid.name, dateOfBirth: kid.dateOfBirth, interests: kid.interests }))
-      : [newKid()],
-    signedOn: reading.signedOn || "",
-  };
-}
-
 const clamp = (value) => Math.min(1, Math.max(0, value));
 
 /**
- * Enter a waiver signed on paper: photograph it, let Claude fill in the
- * details, check them against the page, and save it with the photo - cropped
- * to the paper - as the signature. It then goes out like an online waiver.
+ * Enter a waiver signed on paper: photograph it, crop the photo to the page,
+ * type in the details from the paper, and save it with the cropped photo as
+ * the signature. It then goes out like an online waiver.
  */
 export default function PaperWaiverUpload({ auth, onSaved, onCancel }) {
-  const [stage, setStage] = useState("pick");
+  const [loading, setLoading] = useState(false);
   const [photo, setPhoto] = useState(null);
   const [corners, setCorners] = useState(FULL_FRAME);
   const [preview, setPreview] = useState("");
   const [form, setForm] = useState(blankForm);
-  const [reading, setReading] = useState(null);
-  const [readProblem, setReadProblem] = useState("");
   const [confirmed, setConfirmed] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -98,33 +81,13 @@ export default function PaperWaiverUpload({ auth, onSaved, onCancel }) {
     const file = e.target.files?.[0];
     if (!file) return;
     setError("");
-    setReadProblem("");
-    setStage("reading");
-
-    let loaded;
+    setLoading(true);
     try {
-      loaded = await loadPhoto(file);
+      setPhoto(await loadPhoto(file));
     } catch (err) {
       setError(err.message || "That photo could not be opened.");
-      setStage("pick");
-      return;
-    }
-    setPhoto(loaded);
-
-    // A photo that can't be read is still worth keeping: the details get typed in.
-    try {
-      const result = await adminReadPaperWaiver(auth, {
-        image: loaded.dataUrl,
-        width: loaded.width,
-        height: loaded.height,
-      });
-      setReading(result);
-      setForm(formFromReading(result));
-      if (isUsablePage(result.corners)) setCorners(result.corners);
-    } catch (err) {
-      setReadProblem(err.message || "The photo could not be read.");
     } finally {
-      setStage("review");
+      setLoading(false);
     }
   }
 
@@ -185,21 +148,16 @@ export default function PaperWaiverUpload({ auth, onSaved, onCancel }) {
         </button>
       </div>
 
-      {stage !== "review" ? (
+      {!photo ? (
         <>
           <p className="form-hint">
-            Photograph the signed waiver flat and in good light. Claude reads it and fills in the
-            details for you to check before anything is saved.
+            Photograph the signed waiver flat and in good light. You'll crop it to the page and type
+            in the details from the paper.
           </p>
           <label className="paper-pick">
             Photo of the signed waiver
-            <input type="file" accept="image/*" onChange={onPhoto} disabled={stage === "reading"} />
+            <input type="file" accept="image/*" onChange={onPhoto} disabled={loading} />
           </label>
-          {stage === "reading" ? (
-            <p className="empty-state" role="status">
-              Reading the waiver - this can take half a minute...
-            </p>
-          ) : null}
           {error ? <p className="error">{error}</p> : null}
         </>
       ) : (
@@ -219,17 +177,6 @@ export default function PaperWaiverUpload({ auth, onSaved, onCancel }) {
           </div>
 
           <div className="paper-review-fields">
-            {readProblem ? (
-              <p className="error">
-                {readProblem} Fill in the details from the paper below.
-              </p>
-            ) : null}
-            {reading?.notes ? (
-              <p className="paper-notes">
-                <strong>Double-check:</strong> {reading.notes}
-              </p>
-            ) : null}
-
             <div className="viz-segmented" role="group" aria-label="Who the waiver covers">
               {WHO_OPTIONS.map((option) => (
                 <button
@@ -342,9 +289,6 @@ export default function PaperWaiverUpload({ auth, onSaved, onCancel }) {
               </button>
             ) : null}
 
-            {reading && !reading.signed ? (
-              <p className="error">Claude did not find a signature on this page.</p>
-            ) : null}
             <label className="accept-row">
               <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
               <span>I've checked these details against the paper, and it is signed.</span>

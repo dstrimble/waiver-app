@@ -6,12 +6,6 @@ import { syncWaiverNow } from "../matTracker.js";
 import { getWaiverStats } from "../waiverStats.js";
 import { getConversion, getMembersAndSales } from "../squarespaceStats.js";
 import {
-  isPaperReaderConfigured,
-  PaperReadError,
-  parseImageDataUrl,
-  readPaperWaiver,
-} from "../paperWaiverReader.js";
-import {
   clean,
   PAPER_WAIVER_TEXT_VERSION,
   paperSignedAt,
@@ -321,36 +315,8 @@ adminRouter.post("/waivers/:id/mattracker", requireAdmin, async (req, res) => {
 });
 
 /**
- * Read a photo of a paper waiver: its fields, for a person to check, and the
- * page's corners, for cropping. Nothing is stored.
- */
-adminRouter.post("/paper-waivers/read", requireAdmin, async (req, res) => {
-  if (!isPaperReaderConfigured()) {
-    return res
-      .status(503)
-      .json({ error: "Reading photos is not set up on this server, so type the waiver in by hand." });
-  }
-
-  const photo = parseImageDataUrl(req.body?.image);
-  if (!photo) return res.status(400).json({ error: "Send the photo as a JPEG, PNG or WebP image." });
-  const width = Number(req.body?.width);
-  const height = Number(req.body?.height);
-  if (![width, height].every((n) => Number.isInteger(n) && n > 0 && n <= 10_000)) {
-    return res.status(400).json({ error: "The photo's width and height are required." });
-  }
-
-  try {
-    return res.json(await readPaperWaiver({ ...photo, width, height }));
-  } catch (err) {
-    if (err instanceof PaperReadError) return res.status(422).json({ error: err.message });
-    console.error("Reading a paper waiver failed:", err);
-    return res.status(502).json({ error: "Claude could not read the photo just now." });
-  }
-});
-
-/**
- * Store a paper waiver, checked by a person, with the photo of the signed page
- * as its signature - then email it and set up MatTracker like any other.
+ * Store a paper waiver, typed in by an admin, with the photo of the signed
+ * page as its signature - then email it and set up MatTracker like any other.
  */
 adminRouter.post("/paper-waivers", requireAdmin, async (req, res) => {
   const { signer, participants } = readSubmission(req.body);

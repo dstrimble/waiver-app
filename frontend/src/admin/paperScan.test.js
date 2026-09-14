@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FULL_FRAME, isUsablePage, pageMapper } from "./paperScan.js";
+import { pageMapper } from "./paperScan.js";
 
 // A page photographed at an angle: no two sides parallel.
 const TILTED = [
@@ -48,12 +48,5 @@ describe("paperScan", () => {
     const [x, y] = map(0.5, 0.25);
     expect(x).toBeCloseTo(100, 9);
     expect(y).toBeCloseTo(25, 9);
-  });
-
-  it("will not crop to a sliver or to corners that are missing", () => {
-    expect(isUsablePage(FULL_FRAME)).toBe(true);
-    expect(isUsablePage([{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 0.01 }, { x: 0, y: 0.01 }])).toBe(false);
-    expect(isUsablePage([{ x: 0, y: 0 }, { x: 1, y: NaN }, { x: 1, y: 1 }, { x: 0, y: 1 }])).toBe(false);
-    expect(isUsablePage(undefined)).toBe(false);
   });
 });

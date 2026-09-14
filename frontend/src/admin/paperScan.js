@@ -1,10 +1,8 @@
-// Photos of paper waivers: shrinking one to send to be read, and flattening
-// the page out of it once its corners are known.
+// Photos of paper waivers: shrinking one to work with, and flattening the
+// page out of it once its corners are known.
 
-// Claude reads images at full detail up to this long edge; bigger only costs upload time.
-const READ_LONG_EDGE = 2576;
-// Stays under the API's 5 MB limit for one image.
-const MAX_READ_CHARS = 4.5 * 1024 * 1024;
+// Plenty to place the corners on; a phone camera's full-size photo is slow to crop.
+const WORKING_LONG_EDGE = 2576;
 // The stored photo: handwriting on a letter page stays legible, and the
 // waiver list, which carries every signature, stays small.
 const SCAN_LONG_EDGE = 1700;
@@ -34,24 +32,24 @@ function openImage(file) {
 }
 
 /**
- * A chosen photo, upright and no bigger than Claude can use.
+ * A chosen photo, upright and shrunk to a size that is quick to work with.
  *
  * @returns {Promise<{canvas: HTMLCanvasElement, width: number, height: number, dataUrl: string}>}
  */
 export async function loadPhoto(file) {
   const image = await openImage(file);
-  const scale = Math.min(1, READ_LONG_EDGE / Math.max(image.naturalWidth, image.naturalHeight));
+  const scale = Math.min(1, WORKING_LONG_EDGE / Math.max(image.naturalWidth, image.naturalHeight));
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
   canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
   canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
 
-  let dataUrl = canvas.toDataURL("image/jpeg", 0.88);
-  for (const quality of [0.75, 0.6]) {
-    if (dataUrl.length <= MAX_READ_CHARS) break;
-    dataUrl = canvas.toDataURL("image/jpeg", quality);
-  }
-  return { canvas, width: canvas.width, height: canvas.height, dataUrl };
+  return {
+    canvas,
+    width: canvas.width,
+    height: canvas.height,
+    dataUrl: canvas.toDataURL("image/jpeg", 0.88),
+  };
 }
 
 /**
@@ -80,18 +78,6 @@ export function pageMapper([p0, p1, p2, p3]) {
     const w = g * u + h * v + 1;
     return [(a * u + b * v + p0.x) / w, (d * u + e * v + p0.y) / w];
   };
-}
-
-/** Whether corners outline something worth cropping to, rather than a sliver. */
-export function isUsablePage(corners) {
-  if (!Array.isArray(corners) || corners.length !== 4) return false;
-  if (!corners.every((c) => Number.isFinite(c?.x) && Number.isFinite(c?.y))) return false;
-  let twiceArea = 0;
-  corners.forEach((c, i) => {
-    const next = corners[(i + 1) % 4];
-    twiceArea += c.x * next.y - next.x * c.y;
-  });
-  return Math.abs(twiceArea) / 2 >= 0.05;
 }
 
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);

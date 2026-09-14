@@ -5,18 +5,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 const queryMock = vi.fn();
 const sendMailMock = vi.fn();
 const verifyIdTokenMock = vi.fn();
-const claudeCreateMock = vi.fn();
-
-vi.mock("@anthropic-ai/sdk", () => {
-  class APIError extends Error {}
-  class Anthropic {
-    constructor() {
-      this.beta = { messages: { create: (...args) => claudeCreateMock(...args) } };
-    }
-  }
-  Anthropic.APIError = APIError;
-  return { default: Anthropic, APIError };
-});
 
 vi.mock("google-auth-library", () => ({
   OAuth2Client: class {
@@ -1771,36 +1759,6 @@ describe("family waivers", () => {
 });
 
 describe("paper waivers", () => {
-  const PHOTO = "data:image/jpeg;base64,/9j/4AAQSkZJRg==";
-  const READING = {
-    signer: {
-      name: "Jane Smith",
-      email: "jane@example.com",
-      address: "12 Oak St",
-      city: "Conway",
-      state: "AR",
-      zip: "",
-      cellPhone: "501-555-0100",
-      homePhone: "",
-      otherGymMember: "",
-      membershipExpires: "",
-      heardAbout: "Google",
-      lookingFor: "",
-    },
-    participants: [
-      { name: "Jane Smith", dateOfBirth: "1990-04-02", interests: ["BJJ", "Yoga"], isSigner: true },
-      { name: "Max Smith", dateOfBirth: "04/02/2016", interests: ["Kids Classes"], isSigner: false },
-    ],
-    signedOn: "2026-09-10",
-    signed: true,
-    notes: "The zip code is smudged.",
-    corners: {
-      topLeft: { x: 100, y: 50 },
-      topRight: { x: 1900, y: 80 },
-      bottomRight: { x: 1950, y: 1450 },
-      bottomLeft: { x: 60, y: 1400 },
-    },
-  };
   const PAPER = {
     signer: { name: "Jane Smith", email: "jane@example.com", city: "Conway" },
     participants: [
@@ -1814,8 +1772,6 @@ describe("paper waivers", () => {
   const STORED = { rows: [31, 32].map((id) => ({ id, submitted_at: "2026-09-10T12:00:00.000Z" })) };
   const settle = () => new Promise((resolve) => setTimeout(resolve, 150));
   const asAdmin = (req) => req.set("x-admin-passcode", "changeme");
-  const readPhoto = (body = { image: PHOTO, width: 2000, height: 1500 }) =>
-    asAdmin(request(createApp()).post("/api/admin/paper-waivers/read")).send(body);
   const savePaper = (body = PAPER) => asAdmin(request(createApp()).post("/api/admin/paper-waivers")).send(body);
   const insertCall = () => queryMock.mock.calls.find(([sql]) => sql.includes("INSERT INTO waiver_submissions"));
 
@@ -1825,79 +1781,15 @@ describe("paper waivers", () => {
     queryMock.mockResolvedValue(STORED);
     sendMailMock.mockReset();
     sendMailMock.mockResolvedValue({ messageId: "<abc@local>", accepted: [], rejected: [] });
-    claudeCreateMock.mockReset();
     process.env.ADMIN_PASSCODE = "changeme";
     process.env.WAIVER_NOTIFY_EMAIL = "gravitasmma@gmail.com";
-    process.env.ANTHROPIC_API_KEY = "test-key";
   });
 
   afterEach(async () => {
     await settle();
-    delete process.env.ANTHROPIC_API_KEY;
     delete process.env.SPARTRACKER_WAIVER_URL;
     delete process.env.SPARTRACKER_WAIVER_TOKEN;
     vi.unstubAllGlobals();
-  });
-
-  it("reads a photo into the waiver's fields and the page's corners", async () => {
-    claudeCreateMock.mockResolvedValue({
-      stop_reason: "end_turn",
-      content: [{ type: "text", text: JSON.stringify(READING) }],
-    });
-
-    const res = await readPhoto();
-
-    expect(res.status).toBe(200);
-    expect(res.body.signer).toMatchObject({ name: "Jane Smith", city: "Conway", zip: "" });
-    // A class the gym doesn't teach, or a date not in the asked-for form, is left for a person.
-    expect(res.body.participants).toEqual([
-      { name: "Jane Smith", dateOfBirth: "1990-04-02", interests: ["BJJ"], isSigner: true },
-      { name: "Max Smith", dateOfBirth: "", interests: ["Kids Classes"], isSigner: false },
-    ]);
-    expect(res.body).toMatchObject({ signedOn: "2026-09-10", signed: true, notes: "The zip code is smudged." });
-    // Pixel corners come back as fractions of the photo, clockwise from top-left.
-    expect(res.body.corners).toEqual([
-      { x: 100 / 2000, y: 50 / 1500 },
-      { x: 1900 / 2000, y: 80 / 1500 },
-      { x: 1950 / 2000, y: 1450 / 1500 },
-      { x: 60 / 2000, y: 1400 / 1500 },
-    ]);
-
-    const call = claudeCreateMock.mock.calls[0][0];
-    expect(call.model).toBe("claude-opus-5");
-    expect(call.output_config.format.type).toBe("json_schema");
-    expect(call.messages[0].content[0].source).toEqual({
-      type: "base64",
-      media_type: "image/jpeg",
-      data: "/9j/4AAQSkZJRg==",
-    });
-    expect(call.messages[0].content[1].text).toContain("2000x1500");
-  });
-
-  it("says so when reading photos is not set up", async () => {
-    delete process.env.ANTHROPIC_API_KEY;
-
-    const res = await readPhoto();
-
-    expect(res.status).toBe(503);
-    expect(res.body.error).toMatch(/by hand/);
-    expect(claudeCreateMock).not.toHaveBeenCalled();
-  });
-
-  it("refuses something that is not a photo", async () => {
-    const res = await readPhoto({ image: "data:text/plain;base64,aGVsbG8=", width: 10, height: 10 });
-
-    expect(res.status).toBe(400);
-    expect(claudeCreateMock).not.toHaveBeenCalled();
-  });
-
-  it("reports a photo Claude declined to read rather than inventing a waiver", async () => {
-    claudeCreateMock.mockResolvedValue({ stop_reason: "refusal", content: [] });
-
-    const res = await readPhoto();
-
-    expect(res.status).toBe(422);
-    expect(res.body.error).toMatch(/would not read/);
   });
 
   it("stores a paper waiver with the photo as its signature, and sends it on like any other", async () => {
@@ -1970,12 +1862,10 @@ describe("paper waivers", () => {
   });
 
   it("is for admins only", async () => {
-    const app = createApp();
-    const read = await request(app).post("/api/admin/paper-waivers/read").send({ image: PHOTO });
-    const save = await request(app).post("/api/admin/paper-waivers").send(PAPER);
+    const res = await request(createApp()).post("/api/admin/paper-waivers").send(PAPER);
 
-    expect([read.status, save.status]).toEqual([401, 401]);
-    expect(claudeCreateMock).not.toHaveBeenCalled();
+    expect(res.status).toBe(401);
+    expect(queryMock).not.toHaveBeenCalled();
   });
 });
 

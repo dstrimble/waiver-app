@@ -122,15 +122,6 @@ export function adminArchiveWaiver(auth, id, archived) {
   }).then(handle);
 }
 
-/** Read a photo of a paper waiver: its fields and where the page's corners are. */
-export function adminReadPaperWaiver(auth, { image, width, height }) {
-  return fetch("/api/admin/paper-waivers/read", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders(auth) },
-    body: JSON.stringify({ image, width, height }),
-  }).then(handle);
-}
-
 export function adminSavePaperWaiver(auth, payload) {
   return fetch("/api/admin/paper-waivers", {
     method: "POST",
