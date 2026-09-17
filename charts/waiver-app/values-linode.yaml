@@ -28,6 +28,8 @@ email:
   ACCOUNT_PORTAL_URL: "https://www.gravitasmartialarts.com/account/login"
   SCHEDULE_URL: "https://www.gravitasmartialarts.com/schedule"
   MATTRACKER_URL: "https://mattracker.trimblebarra.com"
+  # The app is unlisted, so this link is the only way anyone finds it.
+  IOS_APP_URL: "https://apps.apple.com/app/id6811444563"
   FOLLOWUP_ENABLED: "true"
   FOLLOWUP_DELAY_DAYS: "7"
   FOLLOWUP_GRACE_DAYS: "3"
