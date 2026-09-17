@@ -20,6 +20,10 @@ export function getSiteConfig() {
     // MatTracker, where members watch class videos they are tagged in. Unset
     // leaves the "Your training videos" section out of the confirmation.
     mattrackerUrl: env("MATTRACKER_URL"),
+    // The iPhone app's App Store page, offered as a badge in every email to the
+    // person who signed. The app is unlisted, so this link is the only way
+    // anyone finds it. Unset and the emails do not mention an app.
+    iosAppUrl: env("IOS_APP_URL"),
     phone: env("GYM_PHONE"),
     address: env("GYM_ADDRESS"),
   };

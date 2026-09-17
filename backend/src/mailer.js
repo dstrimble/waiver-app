@@ -65,7 +65,8 @@ export function resetMailerTransport() {
  * @param {string} message.text
  * @param {string} [message.html]
  * @param {string} [message.replyTo]
- * @param {Array<{filename: string, content: Buffer, contentType?: string}>} [message.attachments]
+ * @param {Array<{filename: string, content: Buffer, contentType?: string, cid?: string}>} [message.attachments]
+ *   An attachment with a `cid` is an inline image the HTML shows as `cid:<cid>`.
  * @returns {Promise<{messageId: string, accepted: string[], rejected: string[]}>}
  */
 export async function sendMail(message) {

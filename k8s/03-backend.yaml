@@ -61,6 +61,8 @@ spec:
               value: "https://mattracker.trimblebarra.com/api/waiver-signed"
             - name: MATTRACKER_URL
               value: "https://mattracker.trimblebarra.com"
+            - name: IOS_APP_URL
+              value: "https://apps.apple.com/app/id6811444563"
             - name: SMTP_HOST
               value: "smtp.gmail.com"
             - name: SMTP_PORT

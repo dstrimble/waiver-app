@@ -1,4 +1,13 @@
+import { readFileSync } from "node:fs";
+
 import { joinNames, participantsOf, referencesOf, signerNameOf } from "./waiverPeople.js";
+
+// Apple's "Download on the App Store" badge, rendered from their SVG at 3x its
+// 120x40 display size. It rides along as an inline attachment rather than a
+// hosted image: mail clients do not draw SVG, and an inline image shows without
+// the reader having to allow remote content.
+const APP_BADGE_CID = "app-store-badge";
+const APP_BADGE_PNG = readFileSync(new URL("./assets/app-store-badge.png", import.meta.url));
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -123,6 +132,36 @@ function stepsHtml(config, heading) {
        </ul>`;
 }
 
+// The iPhone app is unlisted - one gym, not the public - so nobody finds it by
+// searching the store, and this link is the only way in. Unset IOS_APP_URL and
+// the emails do not mention an app.
+function appText(config) {
+  if (!config.iosAppUrl) return [];
+  return [`On an iPhone? Get our app on the App Store: ${config.iosAppUrl}`, ""];
+}
+
+function appHtml(config) {
+  if (!config.iosAppUrl) return "";
+  return `<p style="margin:28px 0 0;"><a href="${escapeHtml(
+    config.iosAppUrl
+  )}"><img src="cid:${APP_BADGE_CID}" alt="Download on the App Store" width="120" height="40" style="display:block;border:0;"></a></p>`;
+}
+
+// The badge image the HTML above points at; the sender attaches it.
+function appAttachments(config) {
+  if (!config.iosAppUrl) return {};
+  return {
+    attachments: [
+      {
+        filename: "app-store-badge.png",
+        content: APP_BADGE_PNG,
+        contentType: "image/png",
+        cid: APP_BADGE_CID,
+      },
+    ],
+  };
+}
+
 function contactsText(config) {
   const contacts = contactLines(config);
   return contacts.length ? ["Questions?", ...contacts, ""] : [];
@@ -201,6 +240,7 @@ export function buildMemberEmail(submission, config) {
     "",
     ...videosText(submission, config),
     ...stepsText(config, "Getting started"),
+    ...appText(config),
     ...contactsText(config),
     `See you on the mats,`,
     config.gymName,
@@ -213,6 +253,7 @@ export function buildMemberEmail(submission, config) {
      <p style="margin:0;">${escapeHtml(thanks)} A PDF copy is attached for your records.</p>
      ${videosHtml(submission, config)}
      ${stepsHtml(config, "Getting started")}
+     ${appHtml(config)}
      ${contactsHtml(config)}
      ${signOffHtml(config)}`
   );
@@ -221,6 +262,7 @@ export function buildMemberEmail(submission, config) {
     subject: `Your signed waiver - ${config.gymName}`,
     text: textParts.join("\n"),
     html,
+    ...appAttachments(config),
   };
 }
 
@@ -243,6 +285,7 @@ export function buildFollowUpEmail(submission, config) {
     pitch,
     "",
     ...stepsText(config, "Ready to join?"),
+    ...appText(config),
     ...contactsText(config),
     `See you on the mats,`,
     config.gymName,
@@ -254,6 +297,7 @@ export function buildFollowUpEmail(submission, config) {
      <p style="margin:0 0 12px;">Hi ${escapeHtml(firstName(submission.name))},</p>
      <p style="margin:0;">${escapeHtml(pitch)}</p>
      ${stepsHtml(config, "Ready to join?")}
+     ${appHtml(config)}
      ${contactsHtml(config)}
      ${signOffHtml(config)}`
   );
@@ -262,6 +306,7 @@ export function buildFollowUpEmail(submission, config) {
     subject: `How was your free trial week at ${shortName}?`,
     text: textParts.join("\n"),
     html,
+    ...appAttachments(config),
   };
 }
 

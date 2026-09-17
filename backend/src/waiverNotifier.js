@@ -71,7 +71,10 @@ export async function sendWaiverNotifications(submission) {
 
     // Send independently so a bad guest address still gets the gym its copy.
     const results = await Promise.allSettled(
-      recipients.map((message) => sendMail({ ...message, attachments }))
+      // A message may bring inline images of its own (the App Store badge).
+      recipients.map((message) =>
+        sendMail({ ...message, attachments: [...attachments, ...(message.attachments || [])] })
+      )
     );
 
     const failures = results

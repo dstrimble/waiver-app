@@ -78,6 +78,7 @@ describe("waiver api", () => {
   afterEach(() => {
     delete process.env.SIGNUP_URL;
     delete process.env.ACCOUNT_PORTAL_URL;
+    delete process.env.IOS_APP_URL;
   });
 
   it("GET /healthz returns ok", async () => {
@@ -168,6 +169,33 @@ describe("waiver api", () => {
       expect(message.attachments[0].contentType).toBe("application/pdf");
       expect(message.attachments[0].content.subarray(0, 5).toString()).toBe("%PDF-");
     }
+  });
+
+  it("POST /api/waivers adds the App Store badge to the signer's copy only", async () => {
+    process.env.IOS_APP_URL = "https://apps.apple.com/app/id6811444563";
+    queryMock.mockResolvedValue({ rows: [{ id: 9, submitted_at: "2026-07-23T00:00:00.000Z" }] });
+
+    const res = await request(createApp()).post("/api/waivers").send({
+      interests: ["BJJ"],
+      name: "Jane Doe",
+      email: "jane@example.com",
+      dateOfBirth: "2000-01-01",
+      accepted: true,
+      signatureName: "Jane Doe",
+      signatureDataUrl: SIGNATURE_PNG,
+    });
+
+    expect(res.status).toBe(201);
+    await waitFor("both emails to be sent", () => sendMailMock.mock.calls.length === 2);
+
+    const byRecipient = Object.fromEntries(sendMailMock.mock.calls.map(([message]) => [message.to, message]));
+    const member = byRecipient["jane@example.com"];
+    expect(member.attachments.map((file) => file.contentType)).toEqual(["application/pdf", "image/png"]);
+    expect(member.attachments[1].cid).toBe("app-store-badge");
+    expect(member.html).toContain('src="cid:app-store-badge"');
+
+    const gym = byRecipient["gravitasmma@gmail.com"];
+    expect(gym.attachments.map((file) => file.contentType)).toEqual(["application/pdf"]);
   });
 
   it("POST /api/waivers still succeeds when email delivery fails", async () => {
@@ -315,6 +343,50 @@ describe("waiver api", () => {
       const email = buildMemberEmail({ ...SUBMISSION, email: '"><script>x</script>@example.com' }, CONFIG);
 
       expect(email.html).not.toContain("<script>");
+    });
+  });
+
+  describe("the iPhone app in the emails to the person who signed", () => {
+    const CONFIG = {
+      gymName: "Gravitas MMA",
+      websiteUrl: "https://www.gravitasmartialarts.com/",
+      iosAppUrl: "https://apps.apple.com/app/id6811444563",
+    };
+
+    it("puts the App Store badge, linked, in the confirmation and the follow-up", () => {
+      for (const email of [buildMemberEmail(SUBMISSION, CONFIG), buildFollowUpEmail(SUBMISSION, CONFIG)]) {
+        expect(email.html).toContain('<a href="https://apps.apple.com/app/id6811444563"><img src="cid:app-store-badge"');
+        expect(email.html).toContain('alt="Download on the App Store"');
+        expect(email.text).toContain("Get our app on the App Store: https://apps.apple.com/app/id6811444563");
+
+        // The badge travels with the message, as the inline image the HTML names.
+        expect(email.attachments).toHaveLength(1);
+        expect(email.attachments[0].cid).toBe("app-store-badge");
+        expect(email.attachments[0].contentType).toBe("image/png");
+        expect(email.attachments[0].content.subarray(1, 4).toString()).toBe("PNG");
+      }
+    });
+
+    it("says nothing about an app when IOS_APP_URL is not set", async () => {
+      const { getSiteConfig } = await vi.importActual("../src/siteConfig.js");
+      delete process.env.IOS_APP_URL;
+      expect(getSiteConfig().iosAppUrl).toBe("");
+
+      for (const email of [
+        buildMemberEmail(SUBMISSION, { ...CONFIG, iosAppUrl: "" }),
+        buildFollowUpEmail(SUBMISSION, { ...CONFIG, iosAppUrl: "" }),
+      ]) {
+        expect(email.html).not.toContain("App Store");
+        expect(email.text).not.toContain("App Store");
+        expect(email.attachments).toBeUndefined();
+      }
+    });
+
+    it("leaves the gym's own copy alone", () => {
+      const email = buildGymEmail(SUBMISSION, CONFIG);
+
+      expect(email.html).not.toContain("App Store");
+      expect(email.attachments).toBeUndefined();
     });
   });
 
